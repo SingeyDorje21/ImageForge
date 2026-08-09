@@ -1,0 +1,49 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environment
+.venv/
+venv/
+ENV/
+
+# Environment variables
+.env
+
+# Storage (local image files)
+storage/originals/
+storage/results/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Pytest
+.pytest_cache/
+htmlcov/
+.coverage
+
+# Agents metadata
+.agents/
+
+# Misc agent-generated files
+BRIEFING.md
+ORIGINAL_REQUEST.md
+PROJECT.md
+TEST_INFRA.md
+handoff.md
+verify_api.py
+stress_test.py
+run_migration.py

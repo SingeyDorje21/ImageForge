@@ -34,7 +34,11 @@ def run(tmp_path):
 
     def _run(original, ops):
         path, ext = original
-        result = process_image(path, str(out_dir), "job", ext, _validated(ops))
+        with open(path, "rb") as f:
+            data, result_ext = process_image(f.read(), ext, _validated(ops))
+        result = str(out_dir / f"job{result_ext}")
+        with open(result, "wb") as f:
+            f.write(data)
         return result, Image.open(result)
     return _run
 

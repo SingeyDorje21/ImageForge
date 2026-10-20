@@ -30,6 +30,13 @@ passed = 0
 failed = 0
 
 
+def open_result(job_data: dict) -> Image.Image:
+    """Download the result through its signed URL and open it."""
+    r = requests.get(job_data["result_url"], timeout=10)
+    r.raise_for_status()
+    return Image.open(io.BytesIO(r.content))
+
+
 def check(name: str, condition: bool, detail: str = ""):
     global passed, failed
     if condition:
@@ -103,7 +110,7 @@ def main():
         result_path = job_data.get("result_path")
         if result_path:
             try:
-                img = Image.open(result_path)
+                img = open_result(job_data)
                 check("Result image is 400x300", img.size == (400, 300), f"got {img.size}")
                 img.close()
             except Exception as e:
@@ -130,7 +137,7 @@ def main():
         if result_path:
             check("Result file ends with .webp", result_path.endswith(".webp"), f"got {result_path}")
             try:
-                img = Image.open(result_path)
+                img = open_result(job_data)
                 check("Result is valid WebP", img.format == "WEBP", f"got {img.format}")
                 img.close()
             except Exception as e:
@@ -152,7 +159,7 @@ def main():
         result_path = job_data.get("result_path")
         if result_path:
             try:
-                img = Image.open(result_path)
+                img = open_result(job_data)
                 check("Result is valid PNG", img.format == "PNG", f"got {img.format}")
                 img.close()
             except Exception as e:
@@ -177,7 +184,7 @@ def main():
         result_path = job_data.get("result_path")
         if result_path:
             try:
-                img = Image.open(result_path)
+                img = open_result(job_data)
                 check("Chained: 200x200", img.size == (200, 200), f"got {img.size}")
                 check("Chained: WebP format", img.format == "WEBP", f"got {img.format}")
                 img.close()

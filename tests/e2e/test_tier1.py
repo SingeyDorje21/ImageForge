@@ -183,8 +183,7 @@ def test_resize_standard(api_client, image_factory, wait_for_job):
     job_data = wait_for_job(job_id)
     assert job_data["status"] == "completed"
     
-    res_url = job_data["result_path"]
-    img_resp = api_client.get(res_url)
+    img_resp = api_client.get(f"/jobs/{job_id}/download")
     assert img_resp.status_code == 200
     
 def test_resize_downscale(api_client, image_factory, wait_for_job):
@@ -214,7 +213,7 @@ def test_resize_result_accessible(api_client, image_factory, wait_for_job):
     resp = api_client.post("/jobs", files=files, data=data)
     job_data = wait_for_job(resp.json()["job_id"])
     assert job_data["status"] == "completed"
-    assert api_client.get(job_data["result_path"]).status_code == 200
+    assert api_client.get(f"/jobs/{job_data['job_id']}/download").status_code == 200
 
 # Feature 7: Image Format Convert
 def test_convert_png_to_jpg(api_client, image_factory, wait_for_job):

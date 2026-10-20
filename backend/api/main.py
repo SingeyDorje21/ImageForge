@@ -8,7 +8,6 @@ from fastapi import FastAPI, Depends, File, Form, HTTPException, Query, UploadFi
 from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
-import aio_pika
 import redis.asyncio as redis
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -27,6 +26,7 @@ class LoginRequest(BaseModel):
 from shared.database import get_db
 from shared.models import Job
 from shared import storage
+from shared.task_queue import create_queue
 from api.config import get_settings
 
 settings = get_settings()
@@ -43,24 +43,7 @@ async def lifespan(app: FastAPI):
     if settings.S3_CREATE_BUCKET:
         await run_in_threadpool(storage.ensure_bucket)
 
-    rabbitmq_connection = await aio_pika.connect_robust(settings.RABBITMQ_URL)
-    rabbitmq_channel = await rabbitmq_connection.channel()
-    
-    await rabbitmq_channel.declare_queue(settings.DLQ_NAME, durable=True)
-    await rabbitmq_channel.declare_queue(
-        settings.RETRY_QUEUE_NAME, 
-        durable=True,
-        arguments={
-            "x-dead-letter-exchange": "",
-            "x-dead-letter-routing-key": settings.QUEUE_NAME,
-            "x-message-ttl": 5000,
-        }
-    )
-    rabbitmq_queue = await rabbitmq_channel.declare_queue(settings.QUEUE_NAME, durable=True)
-    
-    app.state.rabbitmq_channel = rabbitmq_channel
-    app.state.rabbitmq_queue = rabbitmq_queue
-    app.state.rabbitmq_connection = rabbitmq_connection
+    app.state.job_queue = await create_queue(settings)
 
     redis_pool = redis.ConnectionPool.from_url(settings.REDIS_URL, decode_responses=True)
     redis_client = redis.Redis(connection_pool=redis_pool)
@@ -68,7 +51,7 @@ async def lifespan(app: FastAPI):
     
     yield
     
-    await rabbitmq_connection.close()
+    await app.state.job_queue.close()
     await redis_client.aclose()
 
 
@@ -223,16 +206,7 @@ async def create_job(
         await db.commit()
         await db.refresh(job)
 
-        channel = request.app.state.rabbitmq_channel
-        message_body = json.dumps({"job_id": job_id_str}).encode()
-        message = aio_pika.Message(
-            body=message_body,
-            delivery_mode=aio_pika.DeliveryMode.PERSISTENT,
-        )
-        await channel.default_exchange.publish(
-            message,
-            routing_key=settings.QUEUE_NAME,
-        )
+        await request.app.state.job_queue.publish(job_id_str)
         
         # Metrics: Queued
         await request.app.state.redis.incr("metrics:jobs:queued")

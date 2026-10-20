@@ -1,125 +1,46 @@
 import asyncio
 import json
 import logging
-import os
 import functools
-import time
 
 import aio_pika
 import redis.asyncio as redis
-from sqlalchemy import select
-from PIL import UnidentifiedImageError
 
 from api.config import get_settings
-from shared.database import async_session_maker
-from shared.models import Job
-from shared import storage
-from worker.processor import process_image
+from worker.jobs import Outcome, run_job
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-CONTENT_TYPES = {".jpg": "image/jpeg", ".png": "image/png", ".webp": "image/webp"}
-
 async def process_job(message: aio_pika.IncomingMessage, channel: aio_pika.Channel, redis_client: redis.Redis):
     settings = get_settings()
     exchange = channel.default_exchange
+
+    async def publish(routing_key: str):
+        await exchange.publish(
+            aio_pika.Message(body=message.body, delivery_mode=aio_pika.DeliveryMode.PERSISTENT),
+            routing_key=routing_key,
+        )
 
     async with message.process():
         try:
             body = json.loads(message.body.decode())
         except json.JSONDecodeError as e:
             logger.error(f"Poison message (invalid JSON): {e}")
-            await exchange.publish(
-                aio_pika.Message(body=message.body, delivery_mode=aio_pika.DeliveryMode.PERSISTENT),
-                routing_key=settings.DLQ_NAME
-            )
+            await publish(settings.DLQ_NAME)
             return
 
         job_id = body.get("job_id")
         if not job_id:
             logger.error("No job_id in message. Sending to DLQ.")
-            await exchange.publish(
-                aio_pika.Message(body=message.body, delivery_mode=aio_pika.DeliveryMode.PERSISTENT),
-                routing_key=settings.DLQ_NAME
-            )
+            await publish(settings.DLQ_NAME)
             return
 
-        logger.info(f"Processing job {job_id}")
-        start_time = time.time()
-        
-        async with async_session_maker() as session:
-            result = await session.execute(select(Job).where(Job.id == job_id))
-            job = result.scalars().first()
-            if not job:
-                logger.error(f"Job {job_id} not found in DB")
-                return
-
-            job.status = "processing"
-            await session.commit()
-            await session.refresh(job)
-
-            original_path = job.original_path
-            ext = os.path.splitext(original_path)[1]
-
-            try:
-                original = await asyncio.to_thread(storage.download_bytes, original_path)
-                result_bytes, result_ext = await asyncio.to_thread(
-                    process_image,
-                    data=original,
-                    ext=ext,
-                    operations=job.operations,
-                )
-                result_path = f"results/{job.id}{result_ext}"
-                await asyncio.to_thread(
-                    storage.upload_bytes, result_path, result_bytes, CONTENT_TYPES.get(result_ext)
-                )
-
-                job.result_path = result_path
-                job.status = "completed"
-                await session.commit()
-                logger.info(f"Job {job_id} completed successfully")
-                
-                # Metrics: Success
-                await redis_client.incr("metrics:jobs:completed")
-                duration = time.time() - start_time
-                await redis_client.incrbyfloat("metrics:jobs:total_time_sec", duration)
-
-            except UnidentifiedImageError as e:
-                logger.error(f"Job {job_id} failed (unrecoverable): {e}")
-                job.status = "failed"
-                job.error_message = f"Unrecoverable: {e}"
-                await session.commit()
-                
-                # Metrics: Failure
-                await redis_client.incr("metrics:jobs:failed")
-
-            except Exception as e:
-                logger.error(f"Job {job_id} failed (transient): {e}")
-                job.retry_count += 1
-                
-                if job.retry_count < settings.MAX_RETRIES:
-                    logger.info(f"Job {job_id} scheduling retry {job.retry_count}/{settings.MAX_RETRIES}")
-                    job.status = "pending"
-                    job.error_message = str(e)
-                    await session.commit()
-                    
-                    await exchange.publish(
-                        aio_pika.Message(body=message.body, delivery_mode=aio_pika.DeliveryMode.PERSISTENT),
-                        routing_key=settings.RETRY_QUEUE_NAME
-                    )
-                else:
-                    logger.error(f"Job {job_id} exceeded max retries. Sending to DLQ.")
-                    job.status = "failed"
-                    job.error_message = f"Max retries exceeded: {e}"
-                    await session.commit()
-                    
-                    await exchange.publish(
-                        aio_pika.Message(body=message.body, delivery_mode=aio_pika.DeliveryMode.PERSISTENT),
-                        routing_key=settings.DLQ_NAME
-                    )
-                    # Metrics: Failure
-                    await redis_client.incr("metrics:jobs:failed")
+        outcome = await run_job(job_id, redis_client)
+        if outcome == Outcome.RETRY:
+            await publish(settings.RETRY_QUEUE_NAME)
+        elif outcome == Outcome.EXHAUSTED:
+            await publish(settings.DLQ_NAME)
 
 
 async def main():

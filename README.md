@@ -12,7 +12,7 @@ At its core, ImageFlow embraces a highly decoupled microservices architecture:
 
 1. **The Client (React SPA)**: End-users upload images and processing instructions (e.g., "convert to WebP", "resize to 800x600") via a stunning, responsive landing page.
 2. **API Hub (FastAPI)**: The central gateway. It intercepts uploads, enforces rate-limiting via **Redis**, saves the original file to S3-compatible object storage, logs a `pending` job in **PostgreSQL**, and publishes the `job_id` to a message queue.
-3. **Message Queue (RabbitMQ)**: Acts as the robust buffer. It guarantees message delivery and handles Dead Letter Queues (DLQ) for failed jobs.
+3. **Message Queue (RabbitMQ locally, Google Cloud Tasks in production)**: Acts as the robust buffer. It guarantees delivery and retries failed jobs with backoff; RabbitMQ also keeps a Dead Letter Queue (DLQ).
 4. **Worker Nodes (Python Async)**: Dedicated headless processors subscribe to the RabbitMQ queue. They pull the original image, perform the heavy CPU-bound image operations using **Pillow**, upload the result to object storage, and update the PostgreSQL database state to `completed`.
 5. **Real-time Sync**: The frontend continuously polls the API to visually represent the processing timeline and dynamically unlocks a short-lived signed download link the moment the worker node finishes the job.
 
@@ -71,11 +71,19 @@ cd ../frontend && npm install && npm run dev     # terminal 3
 
 ## ☁️ Configuration for deployment
 
+To deploy to Google Cloud Run with everything scaled to zero when idle (Cloud Tasks, Neon, Upstash, Cloudflare R2 and Pages), follow [deploy/cloudrun/README.md](deploy/cloudrun/README.md).
+
+There are two worker entrypoints: `python -m worker.main` consumes RabbitMQ (local and compose), and `uvicorn worker.server:app` is the HTTP worker Cloud Tasks pushes to.
+
 Files live in any S3-compatible bucket (AWS S3, Cloudflare R2, Google Cloud Storage, DigitalOcean Spaces, MinIO, SeaweedFS). Results are served through signed URLs; `GET /jobs/{id}` returns `result_url`, and `GET /jobs/{id}/download` redirects to it.
 
 | Variable | Used by | Purpose |
 | --- | --- | --- |
-| `DATABASE_URL`, `REDIS_URL`, `RABBITMQ_URL` | API, worker | Backing services |
+| `DATABASE_URL`, `REDIS_URL` | API, worker | Backing services |
+| `QUEUE_BACKEND` | API | `rabbitmq` (default, local) or `cloudtasks` (Cloud Run) |
+| `RABBITMQ_URL` | API, worker | Broker for `QUEUE_BACKEND=rabbitmq` |
+| `GCP_PROJECT`, `GCP_LOCATION`, `CLOUD_TASKS_QUEUE` | API | Cloud Tasks queue for `QUEUE_BACKEND=cloudtasks` |
+| `WORKER_URL`, `TASKS_SERVICE_ACCOUNT` | API | HTTP worker that Cloud Tasks calls, and the account that signs its OIDC token |
 | `S3_BUCKET`, `S3_REGION` | API, worker | Bucket to store originals and results |
 | `S3_ENDPOINT_URL` | API, worker | Leave unset for AWS S3; set for R2, GCS, Spaces, MinIO |
 | `S3_PUBLIC_ENDPOINT_URL` | API | Host put in signed URLs when browsers reach storage on a different host |

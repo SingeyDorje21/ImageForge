@@ -10,3 +10,4 @@ python-dotenv>=1.0
 aio-pika>=9.4
 redis>=5.0.1
 boto3>=1.34
+google-cloud-tasks>=2.16

@@ -72,6 +72,8 @@ services:
       <<: *backend-env
       CORS_ORIGINS: http://localhost:5173
       S3_CREATE_BUCKET: "true"
+      # Uploads per client IP per minute; raise it for load tests (tests/perf)
+      RATE_LIMIT_PER_MINUTE: ${RATE_LIMIT_PER_MINUTE:-10}
       # Admin login stays disabled until these are set in your shell or a root .env
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
       JWT_SECRET: ${JWT_SECRET:-}

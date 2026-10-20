@@ -95,3 +95,45 @@ export const toPayload = (steps) =>
     }
     return op;
   });
+
+// One-click starting points for the step list. Each entry is [type, param overrides].
+export const PRESETS = [
+  {
+    name: 'Web optimized',
+    steps: [['resize', { width: 1600, height: 1600 }], ['strip_exif', {}], ['quality', { quality: 80 }], ['format_convert', { target_format: 'webp' }]],
+  },
+  {
+    name: 'Thumbnail',
+    steps: [['resize', { width: 300, height: 300 }], ['format_convert', { target_format: 'webp' }]],
+  },
+  {
+    name: 'Strip metadata',
+    steps: [['strip_exif', {}]],
+  },
+  {
+    name: 'Black & white',
+    steps: [['grayscale', {}], ['sharpen', {}]],
+  },
+];
+
+export const presetSteps = (preset) =>
+  preset.steps.map(([type, overrides]) => {
+    const step = newStep(type);
+    return { ...step, params: { ...step.params, ...overrides } };
+  });
+
+// Short human summary of a step's settings, shown on collapsed rows.
+export const describeStep = ({ type, params }) => {
+  switch (type) {
+    case 'resize': return `${params.width} × ${params.height}`;
+    case 'crop': return `${params.width} × ${params.height} at ${params.left}, ${params.top}`;
+    case 'rotate': return `${params.degrees}°`;
+    case 'flip': return params.direction;
+    case 'blur': return `radius ${params.radius}`;
+    case 'sharpen': return `${params.percent}%`;
+    case 'watermark': return `“${params.text}”`;
+    case 'quality': return `${params.quality}`;
+    case 'format_convert': return params.target_format.toUpperCase();
+    default: return '';
+  }
+};

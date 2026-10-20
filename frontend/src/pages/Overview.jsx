@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import axios from 'axios';
 import { authHeaders, handleAuthError } from '../auth';
+import { API_BASE } from '../config';
+import { useTheme } from '../lib/theme';
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -11,25 +13,25 @@ import {
   Legend,
 } from 'chart.js';
 import { Bar } from 'react-chartjs-2';
-import { Bell, History, User } from 'lucide-react';
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend);
-ChartJS.defaults.color = '#94a3b8';
 ChartJS.defaults.font.family = 'Inter';
 
-const API_BASE = 'http://localhost:8000';
+// Reads a theme color token from index.css so the chart follows light and dark mode.
+const cssColor = (name, alpha = 1) => {
+  const rgb = getComputedStyle(document.documentElement).getPropertyValue(`--${name}`).trim().split(/\s+/).join(', ');
+  return `rgba(${rgb}, ${alpha})`;
+};
 
-const StatCard = ({ title, value, subtext, colorClass }) => (
-  <div className="glass-panel p-6 border-t-2" style={{ borderTopColor: colorClass }}>
-    <h3 className="text-xs font-bold text-textMuted uppercase tracking-wider mb-2">{title}</h3>
-    <div className="flex items-baseline gap-4">
-      <span className="text-3xl font-bold" style={{ color: colorClass }}>{value}</span>
-      {subtext && <span className="text-sm font-medium" style={{ color: colorClass }}>{subtext}</span>}
-    </div>
+const StatCard = ({ title, value, tone }) => (
+  <div className="card p-5">
+    <p className="label">{title}</p>
+    <p className={`text-2xl font-semibold tabular-nums mt-2 ${tone || ''}`}>{value}</p>
   </div>
 );
 
 const Overview = () => {
+  const theme = useTheme();
   const [metrics, setMetrics] = useState({
     jobs_queued: 0,
     jobs_completed: 0,
@@ -55,13 +57,14 @@ const Overview = () => {
   }, []);
 
   const chartData = {
-    labels: ['Queued', 'Completed', 'Failed', 'Rate Limited'],
+    labels: ['Queued', 'Completed', 'Failed', 'Rate limited'],
     datasets: [
       {
-        label: 'Tasks',
+        label: 'Jobs',
         data: [metrics.jobs_queued, metrics.jobs_completed, metrics.jobs_failed, metrics.rate_limit_hits],
-        backgroundColor: ['rgba(56, 189, 248, 0.8)', 'rgba(74, 222, 128, 0.8)', 'rgba(248, 113, 113, 0.8)', 'rgba(251, 191, 36, 0.8)'],
-        borderRadius: 4,
+        backgroundColor: [cssColor('accent', 0.85), cssColor('success', 0.85), cssColor('danger', 0.85), cssColor('warning', 0.85)],
+        borderRadius: 6,
+        maxBarThickness: 56,
       },
     ],
   };
@@ -69,48 +72,32 @@ const Overview = () => {
   const chartOptions = {
     responsive: true,
     maintainAspectRatio: false,
+    color: cssColor('muted'),
     scales: {
-      y: { beginAtZero: true, grid: { color: 'rgba(255,255,255,0.05)' } },
-      x: { grid: { display: false } },
+      y: { beginAtZero: true, grid: { color: cssColor('line') }, border: { display: false }, ticks: { color: cssColor('muted'), precision: 0 } },
+      x: { grid: { display: false }, border: { display: false }, ticks: { color: cssColor('muted') } },
     },
     plugins: { legend: { display: false } },
   };
 
   return (
-    <div className="h-full flex flex-col">
-      {/* Top Header */}
-      <header className="flex justify-between items-center mb-8 border-b border-border pb-4">
-        <h2 className="text-xl font-bold text-white">Distributed Image Processor</h2>
-        <div className="flex items-center gap-4 text-textMuted">
-          <Bell size={20} className="hover:text-white cursor-pointer" />
-          <History size={20} className="hover:text-white cursor-pointer" />
-          <User size={20} className="hover:text-white cursor-pointer" />
-        </div>
-      </header>
-
-      {/* Title */}
-      <div className="mb-6 flex justify-between items-end">
-        <div>
-          <h1 className="text-2xl font-bold text-white mb-1">System Overview</h1>
-          <p className="text-sm text-textMuted">Real-time health and throughput metrics across all distributed nodes.</p>
-        </div>
+    <div className="space-y-8">
+      <div>
+        <h1 className="text-xl font-semibold tracking-tight">Overview</h1>
+        <p className="text-sm text-muted mt-1">Live job throughput and health.</p>
       </div>
 
-      {/* Stats Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
-        <StatCard title="Total Queued" value={metrics.jobs_queued} colorClass="#38bdf8" />
-        <StatCard title="Avg Processing Time" value={`${metrics.avg_processing_time_sec}s`} colorClass="#fbbf24" />
-        <StatCard title="Completed Jobs" value={metrics.jobs_completed} colorClass="#4ade80" />
-        <StatCard title="Failed Jobs" value={metrics.jobs_failed} colorClass="#f87171" />
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <StatCard title="Queued" value={metrics.jobs_queued} />
+        <StatCard title="Avg processing time" value={`${metrics.avg_processing_time_sec}s`} />
+        <StatCard title="Completed" value={metrics.jobs_completed} tone="text-success" />
+        <StatCard title="Failed" value={metrics.jobs_failed} tone="text-danger" />
       </div>
 
-      {/* Chart Area */}
-      <div className="glass-panel flex-1 min-h-[300px] p-6 flex flex-col">
-        <div className="flex justify-between items-center mb-4">
-          <h3 className="text-xs font-bold text-textMuted uppercase tracking-wider">Real-time Throughput</h3>
-        </div>
-        <div className="flex-1 relative">
-          <Bar data={chartData} options={chartOptions} />
+      <div className="card p-5">
+        <p className="label mb-4">Jobs by status</p>
+        <div className="h-72">
+          <Bar key={theme} data={chartData} options={chartOptions} />
         </div>
       </div>
     </div>

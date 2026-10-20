@@ -1,25 +1,85 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 @layer base {
+  :root {
+    --bg: 250 250 249;
+    --surface: 255 255 255;
+    --subtle: 244 244 245;
+    --fg: 24 24 27;
+    --muted: 113 113 122;
+    --line: 228 228 231;
+    --accent: 79 70 229;
+    --accent-fg: 255 255 255;
+    --success: 22 163 74;
+    --danger: 220 38 38;
+    --warning: 217 119 6;
+    color-scheme: light;
+  }
+
+  .dark {
+    --bg: 9 9 11;
+    --surface: 24 24 27;
+    --subtle: 39 39 42;
+    --fg: 244 244 245;
+    --muted: 161 161 170;
+    --line: 39 39 42;
+    --accent: 129 140 248;
+    --accent-fg: 9 9 11;
+    --success: 74 222 128;
+    --danger: 248 113 113;
+    --warning: 251 191 36;
+    color-scheme: dark;
+  }
+
   body {
-    @apply bg-background text-white antialiased font-sans;
+    @apply bg-background text-fg antialiased font-sans transition-colors duration-200;
+  }
+
+  :focus-visible {
+    @apply outline-none ring-2 ring-accent/40 ring-offset-2 ring-offset-background;
   }
 }
 
 @layer components {
-  .glass-panel {
-    @apply bg-panel border border-border rounded-xl shadow-lg;
+  .card {
+    @apply bg-surface border border-line rounded-2xl;
   }
-  
+
+  .input {
+    @apply w-full bg-surface border border-line rounded-lg px-3 py-2 text-sm text-fg placeholder:text-muted
+      transition-colors focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20;
+  }
+
+  .label {
+    @apply text-xs font-medium text-muted;
+  }
+
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-medium
+      transition-colors disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  .btn-primary {
+    @apply btn bg-accent text-accent-fg hover:bg-accent/90;
+  }
+
+  .btn-ghost {
+    @apply btn text-muted hover:text-fg hover:bg-subtle;
+  }
+
+  .btn-outline {
+    @apply btn border border-line text-fg hover:bg-subtle;
+  }
+
   .nav-item {
-    @apply flex items-center gap-3 px-4 py-3 rounded-lg text-textMuted hover:bg-white/5 hover:text-white transition-colors cursor-pointer;
+    @apply flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-muted hover:bg-subtle hover:text-fg transition-colors;
   }
-  
+
   .nav-item.active {
-    @apply bg-white/10 text-white font-medium;
+    @apply bg-subtle text-fg font-medium;
   }
 }

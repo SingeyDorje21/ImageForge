@@ -1,11 +1,58 @@
 import React, { useEffect, useState } from 'react';
 import axios from 'axios';
+import { AnimatePresence, motion } from 'motion/react';
+import { toast } from 'sonner';
+import clsx from 'clsx';
+import { Download, Plus, X } from 'lucide-react';
 import { authHeaders, handleAuthError } from '../auth';
-import { Layers, Play, RefreshCw, X, Download } from 'lucide-react';
+import { API_BASE } from '../config';
+import ImageDrop from '../components/ImageDrop';
 import OperationBuilder from '../components/OperationBuilder';
-import { newStep, toPayload } from '../lib/operations';
+import { OPERATIONS, newStep, toPayload } from '../lib/operations';
+import { resultUrl } from '../lib/jobs';
 
-const API_BASE = 'http://localhost:8000';
+const STATUS = {
+  pending: { label: 'Pending', dot: 'bg-muted', text: 'text-muted' },
+  processing: { label: 'Processing', dot: 'bg-accent animate-pulse', text: 'text-accent' },
+  completed: { label: 'Done', dot: 'bg-success', text: 'text-success' },
+  failed: { label: 'Failed', dot: 'bg-danger', text: 'text-danger' },
+};
+
+const StatusBadge = ({ status }) => {
+  const style = STATUS[status] || STATUS.pending;
+  return (
+    <span className={clsx('inline-flex items-center gap-1.5 text-xs font-medium', style.text)}>
+      <span className={clsx('h-1.5 w-1.5 rounded-full', style.dot)} />
+      {style.label}
+    </span>
+  );
+};
+
+const Modal = ({ onClose, children, title }) => (
+  <motion.div
+    initial={{ opacity: 0 }}
+    animate={{ opacity: 1 }}
+    exit={{ opacity: 0 }}
+    className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm"
+    onClick={onClose}
+  >
+    <motion.div
+      initial={{ opacity: 0, scale: 0.97 }}
+      animate={{ opacity: 1, scale: 1 }}
+      exit={{ opacity: 0, scale: 0.97 }}
+      className="card w-full max-w-lg p-6 max-h-[90vh] overflow-y-auto shadow-xl"
+      onClick={(e) => e.stopPropagation()}
+    >
+      <div className="flex items-center justify-between mb-5">
+        <h2 className="font-semibold">{title}</h2>
+        <button onClick={onClose} aria-label="Close" className="btn-ghost h-8 w-8 p-0 rounded-full">
+          <X size={16} />
+        </button>
+      </div>
+      {children}
+    </motion.div>
+  </motion.div>
+);
 
 const QueueMonitor = () => {
   const [jobs, setJobs] = useState([]);
@@ -14,6 +61,7 @@ const QueueMonitor = () => {
   
   // Upload form state
   const [file, setFile] = useState(null);
+  const [previewUrl, setPreviewUrl] = useState(null);
   const [steps, setSteps] = useState(() => [newStep('resize')]);
   const [uploading, setUploading] = useState(false);
 
@@ -33,6 +81,13 @@ const QueueMonitor = () => {
     return () => clearInterval(interval);
   }, []);
 
+  useEffect(() => {
+    if (!file) return undefined;
+    const url = URL.createObjectURL(file);
+    setPreviewUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [file]);
+
   const handleUpload = async (e) => {
     e.preventDefault();
     if (!file || steps.length === 0) return;
@@ -40,175 +95,119 @@ const QueueMonitor = () => {
     setUploading(true);
     const formData = new FormData();
     formData.append('file', file);
-    
     formData.append('operations', JSON.stringify(toPayload(steps)));
 
     try {
       await axios.post(`${API_BASE}/jobs`, formData);
       setShowUploadModal(false);
       setFile(null);
+      toast.success('Job queued');
       fetchJobs();
     } catch (err) {
       const detail = err.response?.data?.detail;
-      alert(typeof detail === 'string' ? detail : 'Upload failed');
+      toast.error(typeof detail === 'string' ? detail : 'Upload failed');
     } finally {
       setUploading(false);
     }
   };
 
-  const StatusBadge = ({ status }) => {
-    const map = {
-      pending: { bg: 'bg-panel border-textMuted', text: 'text-textMuted', label: 'PENDING' },
-      processing: { bg: 'bg-blue-500/10 border-blue-500/30', text: 'text-primary', label: 'PROCESSING' },
-      completed: { bg: 'bg-green-500/10 border-green-500/30', text: 'text-success', label: 'SUCCESS' },
-      failed: { bg: 'bg-red-500/10 border-red-500/30', text: 'text-danger', label: 'FAILED' }
-    };
-    const style = map[status] || map.pending;
-    return (
-      <span className={`px-3 py-1 rounded-full text-xs font-bold border ${style.bg} ${style.text} flex items-center gap-2 w-fit`}>
-        {status === 'processing' && <span className="w-2 h-2 rounded-full bg-primary animate-pulse"></span>}
-        {style.label}
-      </span>
-    );
-  };
-
-  const handleJobClick = (job) => {
-    if (job.status === 'completed' && job.result_path) {
-      setSelectedJob(job);
-    }
+  const counts = {
+    pending: jobs.filter((j) => j.status === 'pending').length,
+    processing: jobs.filter((j) => j.status === 'processing').length,
   };
 
   return (
-    <div className="h-full flex flex-col relative">
-      <header className="flex justify-between items-center mb-8 border-b border-border pb-4">
-        <h2 className="text-xl font-bold text-white">Queue Monitor</h2>
-        <button 
-          onClick={() => setShowUploadModal(true)}
-          className="bg-primary hover:bg-blue-400 text-slate-900 font-bold py-2 px-6 rounded transition-colors flex items-center gap-2 shadow-[0_0_15px_rgba(56,189,248,0.3)]"
-        >
-          <Play size={16} /> Upload Task
+    <div className="space-y-8">
+      <div className="flex items-end justify-between gap-4">
+        <div>
+          <h1 className="text-xl font-semibold tracking-tight">Jobs</h1>
+          <p className="text-sm text-muted mt-1">
+            {jobs.length} recent · {counts.pending} pending · {counts.processing} processing
+          </p>
+        </div>
+        <button onClick={() => setShowUploadModal(true)} className="btn-primary">
+          <Plus size={16} /> New job
         </button>
-      </header>
-
-      {/* Top Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-        <div className="glass-panel p-6 flex flex-col justify-center">
-          <h3 className="text-xs font-bold text-textMuted uppercase tracking-wider mb-2 flex items-center justify-between">
-            Total Displayed <Layers size={16}/>
-          </h3>
-          <span className="text-4xl font-bold text-white">{jobs.length}</span>
-        </div>
-        <div className="glass-panel p-6 flex flex-col justify-center border-l-2 border-primary">
-          <h3 className="text-xs font-bold text-textMuted uppercase tracking-wider mb-2">Pending Execution</h3>
-          <span className="text-4xl font-bold text-white">{jobs.filter(j => j.status === 'pending').length}</span>
-        </div>
-        <div className="glass-panel p-6 flex flex-col justify-center border-l-2 border-success">
-          <h3 className="text-xs font-bold text-textMuted uppercase tracking-wider mb-2 flex items-center justify-between">
-            Actively Processing <RefreshCw size={16} className="text-success animate-spin-slow"/>
-          </h3>
-          <span className="text-4xl font-bold text-white">{jobs.filter(j => j.status === 'processing').length}</span>
-        </div>
       </div>
 
-      {/* Table */}
-      <div className="glass-panel flex-1 overflow-hidden flex flex-col">
-        <div className="p-4 border-b border-border">
-          <h3 className="text-xs font-bold text-textMuted uppercase tracking-wider">Top 50 Recent Jobs</h3>
-        </div>
-        <div className="flex-1 overflow-auto">
+      <div className="card overflow-hidden">
+        <div className="overflow-x-auto">
           <table className="w-full text-left text-sm">
-            <thead className="bg-white/5 text-textMuted sticky top-0">
+            <thead className="text-muted border-b border-line">
               <tr>
-                <th className="p-4 font-semibold uppercase tracking-wider text-xs">Job ID</th>
-                <th className="p-4 font-semibold uppercase tracking-wider text-xs">Status</th>
-                <th className="p-4 font-semibold uppercase tracking-wider text-xs">File Name</th>
-                <th className="p-4 font-semibold uppercase tracking-wider text-xs">Operations</th>
-                <th className="p-4 font-semibold uppercase tracking-wider text-xs">Time</th>
+                <th className="px-5 py-3 font-medium text-xs">Job</th>
+                <th className="px-5 py-3 font-medium text-xs">Status</th>
+                <th className="px-5 py-3 font-medium text-xs">File</th>
+                <th className="px-5 py-3 font-medium text-xs">Steps</th>
+                <th className="px-5 py-3 font-medium text-xs text-right">Created</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-border">
-              {jobs.map(job => (
-                <tr 
-                  key={job.job_id} 
-                  className={`hover:bg-white/5 transition-colors ${job.status === 'completed' ? 'cursor-pointer hover:bg-success/10' : ''}`}
-                  onClick={() => handleJobClick(job)}
-                >
-                  <td className="p-4 font-mono text-textMuted">{job.job_id.substring(0, 8).toUpperCase()}</td>
-                  <td className="p-4"><StatusBadge status={job.status} /></td>
-                  <td className="p-4 text-white truncate max-w-xs">{job.original_filename}</td>
-                  <td className="p-4 text-textMuted">
-                    {job.operations.map((o, i) => (
-                      <span key={i} className="bg-white/5 px-2 py-1 rounded text-xs mr-2">{o.type}</span>
-                    ))}
-                  </td>
-                  <td className="p-4 text-textMuted">
-                    {new Date(job.created_at).toLocaleTimeString()}
-                  </td>
-                </tr>
-              ))}
+            <tbody className="divide-y divide-line">
+              {jobs.length === 0 && (
+                <tr><td colSpan={5} className="px-5 py-12 text-center text-muted">No jobs yet.</td></tr>
+              )}
+              {jobs.map((job) => {
+                const clickable = job.status === 'completed' && resultUrl(job);
+                return (
+                  <tr
+                    key={job.job_id}
+                    className={clsx('transition-colors', clickable && 'cursor-pointer hover:bg-subtle')}
+                    onClick={() => clickable && setSelectedJob(job)}
+                  >
+                    <td className="px-5 py-3 font-mono text-xs text-muted">{job.job_id.substring(0, 8)}</td>
+                    <td className="px-5 py-3"><StatusBadge status={job.status} /></td>
+                    <td className="px-5 py-3 truncate max-w-xs">{job.original_filename}</td>
+                    <td className="px-5 py-3">
+                      <div className="flex flex-wrap gap-1">
+                        {job.operations.map((o, i) => (
+                          <span key={i} className="bg-subtle px-2 py-0.5 rounded-md text-xs text-muted">
+                            {OPERATIONS[o.type]?.label || o.type}
+                          </span>
+                        ))}
+                      </div>
+                    </td>
+                    <td className="px-5 py-3 text-right text-muted tabular-nums">
+                      {new Date(job.created_at).toLocaleTimeString()}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
       </div>
 
-      {/* Upload Modal */}
-      {showUploadModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-background/80 backdrop-blur-sm">
-          <div className="glass-panel w-full max-w-md p-6 relative max-h-[90vh] overflow-y-auto">
-            <button onClick={() => setShowUploadModal(false)} className="absolute top-4 right-4 text-textMuted hover:text-white">
-              <X size={24} />
-            </button>
-            <h2 className="text-xl font-bold mb-6 text-white">Upload New Task</h2>
-            <form onSubmit={handleUpload} className="space-y-4">
-              <div>
-                <label className="block text-xs text-textMuted uppercase mb-1">Image File</label>
-                <input type="file" onChange={(e) => setFile(e.target.files[0])} accept="image/*" required className="w-full text-sm text-textMuted file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-primary/10 file:text-primary hover:file:bg-primary/20 cursor-pointer" />
-              </div>
-              <div>
-                <label className="block text-xs text-textMuted uppercase mb-1">Operations (applied in order)</label>
-                <OperationBuilder
-                  steps={steps}
-                  onChange={setSteps}
-                  inputClass="w-full bg-white/5 border border-border rounded px-3 py-2 text-white text-sm"
-                  labelClass="text-xs font-bold text-white uppercase tracking-wider"
-                  stepClass="bg-white/5 border border-border rounded p-3 text-textMuted"
-                  buttonClass="bg-primary/10 text-primary hover:bg-primary/20 font-semibold text-sm px-3 py-2 rounded"
-                />
-              </div>
-              <div className="pt-4">
-                <button type="submit" disabled={uploading || !file || steps.length === 0} className="w-full bg-primary hover:bg-blue-400 text-slate-900 font-bold py-3 rounded transition-colors disabled:opacity-50">
-                  {uploading ? 'Submitting...' : 'Queue Task'}
-                </button>
-              </div>
+      <AnimatePresence>
+        {showUploadModal && (
+          <Modal title="New job" onClose={() => setShowUploadModal(false)}>
+            <form onSubmit={handleUpload} className="space-y-5">
+              <ImageDrop
+                file={file}
+                previewUrl={previewUrl}
+                onFile={setFile}
+                onClear={() => { setFile(null); setPreviewUrl(null); }}
+                onReject={toast.error}
+              />
+              <OperationBuilder steps={steps} onChange={setSteps} />
+              <button type="submit" disabled={uploading || !file || steps.length === 0} className="btn-primary w-full py-2.5">
+                {uploading ? 'Submitting…' : 'Queue job'}
+              </button>
             </form>
-          </div>
-        </div>
-      )}
+          </Modal>
+        )}
 
-      {/* Preview/Download Modal */}
-      {selectedJob && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-background/80 backdrop-blur-sm" onClick={() => setSelectedJob(null)}>
-          <div className="glass-panel w-full max-w-lg p-6 relative text-center flex flex-col items-center" onClick={e => e.stopPropagation()}>
-            <button onClick={() => setSelectedJob(null)} className="absolute top-4 right-4 text-textMuted hover:text-white">
-              <X size={24} />
-            </button>
-            <h2 className="text-xl font-bold mb-2 text-white">Job Completed</h2>
-            <p className="text-sm text-textMuted mb-6 font-mono">{selectedJob.job_id}</p>
-            
-            <div className="w-full aspect-video bg-black/50 rounded-lg flex items-center justify-center mb-6 overflow-hidden border border-border relative group">
-              <img src={`${API_BASE}/storage/results/${selectedJob.result_path.split(/[\\/]/).pop()}`} alt="Result" className="max-w-full max-h-full object-contain" />
-              <div className="absolute inset-0 bg-black/60 flex flex-col items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                 <span className="text-white text-sm font-bold mb-2">Processed Image</span>
-                 <p className="text-xs font-mono text-primary break-all">{selectedJob.result_path.split(/[\\/]/).pop()}</p>
-              </div>
+        {selectedJob && (
+          <Modal title={selectedJob.original_filename} onClose={() => setSelectedJob(null)}>
+            <div className="rounded-xl bg-subtle flex items-center justify-center aspect-video overflow-hidden mb-4">
+              <img src={resultUrl(selectedJob)} alt="Result" className="max-w-full max-h-full object-contain" />
             </div>
-
-            <a href={`${API_BASE}/storage/results/${selectedJob.result_path.split(/[\\/]/).pop()}`} download target="_blank" rel="noreferrer" className="w-full bg-success hover:bg-green-400 text-slate-900 font-bold py-3 rounded transition-colors flex items-center justify-center gap-2 shadow-[0_0_15px_rgba(74,222,128,0.3)]">
-              <Download size={20} /> Download Image
+            <p className="text-xs font-mono text-muted mb-4 break-all">{selectedJob.job_id}</p>
+            <a href={resultUrl(selectedJob)} download target="_blank" rel="noreferrer" className="btn-primary w-full py-2.5">
+              <Download size={16} /> Download
             </a>
-          </div>
-        </div>
-      )}
+          </Modal>
+        )}
+      </AnimatePresence>
     </div>
   );
 };

@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
 import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
-
-const API_BASE = 'http://localhost:8000';
+import { Loader2 } from 'lucide-react';
+import { API_BASE } from '../config';
+import ThemeToggle from '../components/ThemeToggle';
 
 const Login = ({ onLogin }) => {
   const [password, setPassword] = useState('');
@@ -34,35 +35,32 @@ const Login = ({ onLogin }) => {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-background relative overflow-hidden">
-      {/* Decorative background blurs */}
-      <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-primary/20 rounded-full blur-[100px] pointer-events-none"></div>
-      <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-purple-500/10 rounded-full blur-[100px] pointer-events-none"></div>
-      
-      <div className="glass-panel w-full max-w-md p-8 relative z-10 text-center">
-        <h1 className="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-primary to-blue-400 mb-2">
-          ImageFlow
-        </h1>
-        <p className="text-textMuted mb-8">Authorized Personnel Only</p>
-        
-        <form onSubmit={handleSubmit} className="space-y-6">
-          <div>
-            <input 
-              type="password" 
-              placeholder="Admin Password" 
+    <div className="min-h-screen flex items-center justify-center px-5">
+      <ThemeToggle className="fixed top-5 right-5" />
+      <div className="w-full max-w-sm">
+        <div className="flex items-center gap-2 font-semibold tracking-tight mb-8">
+          <img src="/favicon.svg" alt="" className="h-6 w-6" />
+          ImageForge
+        </div>
+        <h1 className="text-xl font-semibold tracking-tight">Admin sign in</h1>
+        <p className="text-sm text-muted mt-1 mb-6">Enter the admin password to view the dashboard.</p>
+
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <label className="flex flex-col gap-1.5">
+            <span className="label">Password</span>
+            <input
+              type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="w-full bg-white/5 border border-border rounded-lg px-4 py-3 text-white focus:outline-none focus:border-primary transition-colors"
+              className="input py-2.5"
+              autoFocus
               required
             />
-          </div>
-          {error && <div className="text-danger text-sm">{error}</div>}
-          <button 
-            type="submit" 
-            disabled={loading}
-            className="w-full bg-primary hover:bg-blue-400 text-slate-900 font-bold py-3 rounded-lg transition-colors shadow-[0_0_15px_rgba(56,189,248,0.5)] disabled:opacity-50"
-          >
-            {loading ? 'Authenticating...' : 'Access Dashboard'}
+          </label>
+          {error && <p className="text-sm text-danger">{error}</p>}
+          <button type="submit" disabled={loading} className="btn-primary w-full py-2.5">
+            {loading && <Loader2 size={16} className="animate-spin" />}
+            {loading ? 'Signing in…' : 'Sign in'}
           </button>
         </form>
       </div>

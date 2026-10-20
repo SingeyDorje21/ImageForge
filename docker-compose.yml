@@ -72,6 +72,9 @@ services:
       <<: *backend-env
       CORS_ORIGINS: http://localhost:5173
       S3_CREATE_BUCKET: "true"
+      # Admin login stays disabled until these are set in your shell or a root .env
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      JWT_SECRET: ${JWT_SECRET:-}
     ports:
       - "8000:8000"
     depends_on:

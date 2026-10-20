@@ -3,12 +3,22 @@ Test Redis Caching and Rate Limiting (Phase 4).
 """
 
 import io
+import os
 import json
 import time
 import requests
 import sys
 
 BASE_URL = "http://127.0.0.1:8000"
+
+
+def admin_headers() -> dict:
+    """Log in with ADMIN_PASSWORD from the environment for admin-only endpoints."""
+    password = os.environ.get("ADMIN_PASSWORD", "")
+    r = requests.post(f"{BASE_URL}/login", json={"password": password})
+    if r.status_code != 200:
+        return {}
+    return {"Authorization": f"Bearer {r.json()['token']}"}
 
 def check(name: str, condition: bool, detail: str = ""):
     if condition:
@@ -57,7 +67,7 @@ def main():
     # We don't have the job_id from the first request saved, let's just make one valid request, wait for it, and benchmark.
     # Wait, we are already rate limited! We might get 429 if we try to post again.
     # Let's just list jobs to get an ID.
-    r = requests.get(f"{BASE_URL}/jobs?limit=1")
+    r = requests.get(f"{BASE_URL}/jobs?limit=1", headers=admin_headers())
     if r.status_code == 200 and r.json():
         job_id = r.json()[0]["job_id"]
         

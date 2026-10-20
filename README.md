@@ -51,7 +51,7 @@ docker compose up -d --build
 ```
 This starts Postgres, Redis, RabbitMQ, a local S3-compatible store (SeaweedFS), the API, the worker and the frontend. The API applies Alembic migrations on startup and creates the bucket.
 
-- Frontend: `http://localhost:5173/` (admin at `/login`, password `imageforge_admin_123`)
+- Frontend: `http://localhost:5173/` (admin at `/login`; set `ADMIN_PASSWORD` and `JWT_SECRET` in your shell or a root `.env` before `docker compose up`, or login stays disabled)
 - API docs: `http://localhost:8000/docs`
 
 ### Option B: infra in Docker, app on your machine
@@ -61,7 +61,7 @@ docker compose up -d postgres redis rabbitmq s3
 cd backend
 python -m venv venv && source venv/bin/activate   # .\venv\Scripts\activate on Windows
 pip install -r requirements.txt
-cp .env.example .env
+cp .env.example .env   # then set ADMIN_PASSWORD and JWT_SECRET, see "Security configuration"
 alembic upgrade head
 uvicorn api.main:app --reload --port 8000        # terminal 1
 python -m worker.main                            # terminal 2
@@ -91,10 +91,21 @@ Files live in any S3-compatible bucket (AWS S3, Cloudflare R2, Google Cloud Stor
 | `S3_FORCE_PATH_STYLE` | API, worker | `true` for MinIO/SeaweedFS |
 | `S3_URL_EXPIRY_SECONDS` | API | Lifetime of signed download URLs (default 3600) |
 | `S3_CREATE_BUCKET` | API | Create the bucket on startup (local dev) |
-| `CORS_ORIGINS` | API | Comma-separated frontend origins |
 | `RATE_LIMIT_PER_MINUTE` | API | Uploads per client IP per minute (default 10) |
 | `RUN_MIGRATIONS` | API image | `false` to skip `alembic upgrade head` on startup |
 | `VITE_API_URL` | frontend build | Public URL of the API, baked in at build time |
+
+### Security configuration
+| Variable | Purpose |
+| --- | --- |
+| `ADMIN_PASSWORD` | Admin portal password. Login is disabled (HTTP 503) until it is set. |
+| `JWT_SECRET` | Key that signs admin tokens. If unset, a random key is used and tokens stop working on restart. |
+| `TOKEN_TTL_MINUTES` | How long an admin token stays valid (default 60). |
+| `LOGIN_MAX_ATTEMPTS` / `LOGIN_WINDOW_SECONDS` | Failed logins allowed per client IP within the window (default 5 per 15 minutes); further attempts get HTTP 429 until it expires. |
+| `TRUST_PROXY_HEADERS` | Set to `true` on Cloud Run or behind another proxy so rate limits use the client IP from `X-Forwarded-For` (default `false`). |
+| `CORS_ORIGINS` | Comma-separated browser origins allowed to call the API (default `http://localhost:5173`). |
+
+`GET /jobs` and `GET /metrics` require an `Authorization: Bearer <token>` header obtained from `POST /login`.
 
 ---
 *Developed as a showcase for high-performance, asynchronous system design.*

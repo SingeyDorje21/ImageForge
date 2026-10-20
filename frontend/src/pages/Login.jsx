@@ -19,7 +19,7 @@ const Login = ({ onLogin }) => {
       if (res.data.token) {
         localStorage.setItem('imageforge_token', res.data.token);
         onLogin();
-        navigate('/');
+        navigate('/admin');
       }
     } catch (err) {
       const status = err.response?.status;

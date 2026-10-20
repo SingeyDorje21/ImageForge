@@ -1,37 +1,51 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { useDropzone } from 'react-dropzone';
 import { ImagePlus, X } from 'lucide-react';
 import clsx from 'clsx';
 import { formatBytes } from '../lib/jobs';
+import { ACCEPT, usePasteImages } from '../lib/images';
 
 export const MAX_FILE_MB = 10;
-const ACCEPT = { 'image/jpeg': ['.jpg', '.jpeg'], 'image/png': ['.png'], 'image/webp': ['.webp'] };
 
-// Drop, browse or paste an image. Shows a preview with dimensions and size once chosen.
-const ImageDrop = ({ file, previewUrl, onFile, onClear, onReject, className = 'h-64' }) => {
-  const [dimensions, setDimensions] = useState(null);
+const rejectionMessage = (rejections) => {
+  if (rejections.some((r) => r.errors.some((e) => e.code === 'too-many-files'))) return 'Please choose one image.';
+  const tooLarge = rejections.filter((r) => r.errors.some((e) => e.code === 'file-too-large')).length;
+  const wrongType = rejections.length - tooLarge;
+  const parts = [];
+  if (tooLarge) parts.push(tooLarge === 1 ? `1 file is over ${MAX_FILE_MB} MB` : `${tooLarge} files are over ${MAX_FILE_MB} MB`);
+  if (wrongType) parts.push(wrongType === 1 ? '1 file is not a JPG, PNG or WebP image' : `${wrongType} files are not JPG, PNG or WebP images`);
+  return `Skipped: ${parts.join(' and ')}.`;
+};
 
-  const { getRootProps, getInputProps, isDragActive } = useDropzone({
+// File picking shared by the drop area and the "Add images" button.
+const useImagePicker = ({ multiple, onFiles, onReject, noDrag = false }) =>
+  useDropzone({
     accept: ACCEPT,
-    maxFiles: 1,
+    multiple,
+    maxFiles: multiple ? 0 : 1,
     maxSize: MAX_FILE_MB * 1024 * 1024,
-    onDropAccepted: ([accepted]) => onFile(accepted),
-    onDropRejected: ([rejection]) => {
-      const code = rejection?.errors[0]?.code;
-      onReject(code === 'file-too-large'
-        ? `That file is over ${MAX_FILE_MB} MB.`
-        : 'Please choose a JPG, PNG or WebP image.');
-    },
+    noDrag,
+    onDropAccepted: (accepted) => onFiles(multiple ? accepted : accepted.slice(0, 1)),
+    onDropRejected: (rejections) => onReject?.(rejectionMessage(rejections)),
   });
 
-  useEffect(() => {
-    const onPaste = (e) => {
-      const item = [...(e.clipboardData?.files || [])].find((f) => Object.keys(ACCEPT).includes(f.type));
-      if (item) onFile(item);
-    };
-    window.addEventListener('paste', onPaste);
-    return () => window.removeEventListener('paste', onPaste);
-  }, [onFile]);
+export const AddImagesButton = ({ onFiles, onReject, className = '', children }) => {
+  const { getRootProps, getInputProps } = useImagePicker({ multiple: true, onFiles, onReject, noDrag: true });
+  return (
+    <button type="button" {...getRootProps({ className })}>
+      <input {...getInputProps()} />
+      {children}
+    </button>
+  );
+};
+
+// Drop, browse or paste images. With a single file chosen it shows a preview with dimensions and size.
+// Pass onFiles with multiple to accept several at once, or onFile for one.
+const ImageDrop = ({ file, previewUrl, onFile, onFiles, multiple = false, paste = true, onClear, onReject, className = 'h-64' }) => {
+  const [dimensions, setDimensions] = useState(null);
+  const handleFiles = useCallback((files) => (multiple ? onFiles(files) : onFile(files[0])), [multiple, onFiles, onFile]);
+  const { getRootProps, getInputProps, isDragActive } = useImagePicker({ multiple, onFiles: handleFiles, onReject });
+  usePasteImages(handleFiles, paste);
 
   useEffect(() => setDimensions(null), [previewUrl]);
 
@@ -78,8 +92,12 @@ const ImageDrop = ({ file, previewUrl, onFile, onClear, onReject, className = 'h
         <ImagePlus size={20} />
       </div>
       <div>
-        <p className="text-sm font-medium">{isDragActive ? 'Drop it here' : 'Drop an image, or click to browse'}</p>
-        <p className="text-xs text-muted mt-1">You can also paste. JPG, PNG or WebP up to {MAX_FILE_MB} MB.</p>
+        <p className="text-sm font-medium">
+          {isDragActive ? 'Drop to add' : multiple ? 'Drop images, or click to browse' : 'Drop an image, or click to browse'}
+        </p>
+        <p className="text-xs text-muted mt-1">
+          {multiple && 'Pick as many as you like. '}You can also paste. JPG, PNG or WebP up to {MAX_FILE_MB} MB{multiple && ' each'}.
+        </p>
       </div>
     </div>
   );

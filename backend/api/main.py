@@ -28,6 +28,7 @@ class LoginRequest(BaseModel):
 from shared.database import get_db
 from shared.models import Job
 from api.config import get_settings
+from api.auth import check_password, create_token, require_admin
 
 settings = get_settings()
 
@@ -82,18 +83,27 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=settings.cors_origins,
+    allow_credentials=False,
+    allow_methods=["GET", "POST"],
+    allow_headers=["Authorization", "Content-Type"],
 )
 
 os.makedirs(STORAGE_PATH, exist_ok=True)
 app.mount("/storage", StaticFiles(directory=STORAGE_PATH), name="storage")
 
 
+def get_client_ip(request: Request) -> str:
+    if settings.TRUST_PROXY_HEADERS:
+        forwarded = request.headers.get("x-forwarded-for")
+        if forwarded:
+            # The proxy appends the address it saw; earlier entries can be forged by the client.
+            return forwarded.split(",")[-1].strip()
+    return request.client.host if request.client else "127.0.0.1"
+
+
 async def verify_rate_limit(request: Request):
-    client_ip = request.client.host if request.client else "127.0.0.1"
+    client_ip = get_client_ip(request)
     current_minute = int(time.time() / 60)
     redis_key = f"rate_limit:{client_ip}:{current_minute}"
     redis_client = request.app.state.redis
@@ -268,7 +278,7 @@ async def get_job(job_id: UUID, request: Request, db: AsyncSession = Depends(get
     return response
 
 
-@app.get("/jobs", response_model=list[JobStatusResponse])
+@app.get("/jobs", response_model=list[JobStatusResponse], dependencies=[Depends(require_admin)])
 async def list_jobs(
     status_filter: str | None = Query(None, alias="status"),
     limit: int = Query(20, ge=1, le=100),
@@ -297,7 +307,7 @@ async def list_jobs(
     ]
 
 
-@app.get("/metrics")
+@app.get("/metrics", dependencies=[Depends(require_admin)])
 async def get_metrics(request: Request):
     """Retrieve global system metrics from Redis."""
     redis_client = request.app.state.redis
@@ -321,7 +331,27 @@ async def get_metrics(request: Request):
 
 
 @app.post("/login")
-async def login(req: LoginRequest):
-    if req.password == settings.ADMIN_PASSWORD:
-        return {"token": "admin-token-xyz"}
+async def login(req: LoginRequest, request: Request):
+    client_ip = get_client_ip(request)
+    redis_key = f"login_failures:{client_ip}"
+    redis_client = request.app.state.redis
+
+    failures = int(await redis_client.get(redis_key) or 0)
+    if failures >= settings.LOGIN_MAX_ATTEMPTS:
+        retry_after = await redis_client.ttl(redis_key)
+        await redis_client.incr("metrics:login_rate_limit:hits")
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many failed login attempts. Try again later.",
+            headers={"Retry-After": str(max(retry_after, 1))},
+        )
+
+    if check_password(req.password):
+        await redis_client.delete(redis_key)
+        token, expires_in = create_token()
+        return {"token": token, "token_type": "bearer", "expires_in": expires_in}
+
+    count = await redis_client.incr(redis_key)
+    if count == 1:
+        await redis_client.expire(redis_key, settings.LOGIN_WINDOW_SECONDS)
     raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid password")

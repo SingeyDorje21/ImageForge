@@ -13,7 +13,23 @@ class Settings(BaseSettings):
     DLQ_NAME: str = "image_jobs_dlq"
     MAX_RETRIES: int = 3
     REDIS_URL: str = "redis://localhost:6379/0"
-    ADMIN_PASSWORD: str = "imageforge_admin_123"
+    # No default: admin login stays disabled until ADMIN_PASSWORD is set.
+    ADMIN_PASSWORD: str | None = None
+    # Key used to sign admin tokens. Set a long random value in production.
+    JWT_SECRET: str | None = None
+    TOKEN_TTL_MINUTES: int = 60
+    # Failed admin logins allowed per client IP within the window before /login returns 429.
+    LOGIN_MAX_ATTEMPTS: int = 5
+    LOGIN_WINDOW_SECONDS: int = 900
+    # Set to true behind a proxy that appends the client IP to X-Forwarded-For
+    # (e.g. Google Cloud Run), so rate limits count each user separately.
+    TRUST_PROXY_HEADERS: bool = False
+    # Comma-separated list of origins allowed to call the API from a browser.
+    CORS_ORIGINS: str = "http://localhost:5173"
+
+    @property
+    def cors_origins(self) -> list[str]:
+        return [o.strip() for o in self.CORS_ORIGINS.split(",") if o.strip()]
 
     class Config:
         env_file = ".env"

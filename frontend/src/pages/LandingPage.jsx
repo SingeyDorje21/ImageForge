@@ -1,5 +1,4 @@
 import React, { useState, useEffect } from 'react';
-import { NavLink } from 'react-router-dom';
 import axios from 'axios';
 import { UploadCloud, Server, Database, Activity, RefreshCw, Layers, Monitor, HardDrive, Download, CheckCircle, Clock, XCircle } from 'lucide-react';
 
@@ -79,9 +78,6 @@ const LandingPage = () => {
         <nav className="hidden md:flex items-center gap-8 text-sm font-bold tracking-wider">
           <a href="#product" className="hover:text-primary transition-colors">PRODUCT</a>
           <a href="#network" className="hover:text-primary transition-colors">NETWORK</a>
-          <NavLink to="/login" className="bg-white text-black px-6 py-2 border-2 border-black hover:bg-transparent hover:text-white hover:border-white transition-all shadow-[4px_4px_0px_#f87171]">
-            ADMIN PORTAL
-          </NavLink>
         </nav>
       </header>
 

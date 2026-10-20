@@ -73,6 +73,11 @@ python -m venv venv
 # source venv/bin/activate  # On macOS/Linux
 pip install -r requirements.txt
 
+# Configure secrets: copy the example and set ADMIN_PASSWORD and JWT_SECRET
+cp .env.example .env
+# Generate a signing secret with:
+#   python -c "import secrets; print(secrets.token_urlsafe(48))"
+
 # Start the FastAPI Server (Port 8000)
 uvicorn api.main:app --reload --port 8000
 ```
@@ -98,9 +103,21 @@ npm install
 npm run dev
 ```
 
+### Security configuration
+| Variable | Purpose |
+| --- | --- |
+| `ADMIN_PASSWORD` | Admin portal password. Login is disabled (HTTP 503) until it is set. |
+| `JWT_SECRET` | Key that signs admin tokens. If unset, a random key is used and tokens stop working on restart. |
+| `TOKEN_TTL_MINUTES` | How long an admin token stays valid (default 60). |
+| `LOGIN_MAX_ATTEMPTS` / `LOGIN_WINDOW_SECONDS` | Failed logins allowed per client IP within the window (default 5 per 15 minutes); further attempts get HTTP 429 until it expires. |
+| `TRUST_PROXY_HEADERS` | Set to `true` on Cloud Run or behind another proxy so rate limits use the client IP from `X-Forwarded-For` (default `false`). |
+| `CORS_ORIGINS` | Comma-separated browser origins allowed to call the API (default `http://localhost:5173`). |
+
+`GET /jobs` and `GET /metrics` require an `Authorization: Bearer <token>` header obtained from `POST /login`.
+
 ### 4. Access the System
 - **Public Landing Page**: Navigate to `http://localhost:5173/` to upload tasks and view the animated architecture pipeline.
-- **Admin Portal**: Navigate to `http://localhost:5173/login` (Password: `imageforge_admin_123`) to view real-time metrics and manage the queue.
+- **Admin Portal**: Navigate to `http://localhost:5173/login` and sign in with the `ADMIN_PASSWORD` you set in `backend/.env` to view real-time metrics and manage the queue.
 - **API Documentation**: Navigate to `http://localhost:8000/docs` to interact with the auto-generated Swagger UI.
 
 ---

@@ -22,7 +22,9 @@ const Login = ({ onLogin }) => {
         navigate('/');
       }
     } catch (err) {
-      setError('Invalid admin password.');
+      setError(err.response?.status === 503
+        ? 'Admin login is not configured on the server.'
+        : 'Invalid admin password.');
     } finally {
       setLoading(false);
     }

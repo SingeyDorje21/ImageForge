@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import axios from 'axios';
+import { authHeaders, handleAuthError } from '../auth';
 import { Layers, Play, RefreshCw, X, Download } from 'lucide-react';
 
 const API_BASE = 'http://localhost:8000';
@@ -19,9 +20,10 @@ const QueueMonitor = () => {
 
   const fetchJobs = async () => {
     try {
-      const res = await axios.get(`${API_BASE}/jobs?limit=50`);
+      const res = await axios.get(`${API_BASE}/jobs?limit=50`, { headers: authHeaders() });
       setJobs(res.data);
     } catch (err) {
+      if (handleAuthError(err)) return;
       console.error('Error fetching jobs', err);
     }
   };

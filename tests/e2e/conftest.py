@@ -9,6 +9,12 @@ from PIL import Image
 def api_client():
     base_url = os.environ.get("API_URL", "http://localhost:8000")
     session = requests.Session()
+    # Admin-only endpoints (GET /jobs, /metrics) need a token from /login.
+    admin_password = os.environ.get("ADMIN_PASSWORD")
+    if admin_password:
+        resp = session.post(f"{base_url}/login", json={"password": admin_password})
+        resp.raise_for_status()
+        session.headers["Authorization"] = f"Bearer {resp.json()['token']}"
     
     class APIClient:
         def __init__(self, session, base_url):

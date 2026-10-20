@@ -103,7 +103,7 @@ def test_submit_missing_required_op_field(api_client, image_factory):
 
 def test_submit_unknown_operation(api_client, image_factory):
     files = {"file": ("test.png", image_factory("png"), "image/png")}
-    data = {"operations": json.dumps([{"type": "rotate", "angle": 90}])}
+    data = {"operations": json.dumps([{"type": "teleport", "distance": 90}])}
     resp = api_client.post("/jobs", files=files, data=data)
     assert resp.status_code == 422
 

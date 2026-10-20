@@ -21,6 +21,9 @@ class Settings(BaseSettings):
     # Failed admin logins allowed per client IP within the window before /login returns 429.
     LOGIN_MAX_ATTEMPTS: int = 5
     LOGIN_WINDOW_SECONDS: int = 900
+    # Set to true behind a proxy that appends the client IP to X-Forwarded-For
+    # (e.g. Google Cloud Run), so rate limits count each user separately.
+    TRUST_PROXY_HEADERS: bool = False
     # Comma-separated list of origins allowed to call the API from a browser.
     CORS_ORIGINS: str = "http://localhost:5173"
 

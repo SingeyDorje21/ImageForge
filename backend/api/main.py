@@ -93,8 +93,17 @@ os.makedirs(STORAGE_PATH, exist_ok=True)
 app.mount("/storage", StaticFiles(directory=STORAGE_PATH), name="storage")
 
 
+def get_client_ip(request: Request) -> str:
+    if settings.TRUST_PROXY_HEADERS:
+        forwarded = request.headers.get("x-forwarded-for")
+        if forwarded:
+            # The proxy appends the address it saw; earlier entries can be forged by the client.
+            return forwarded.split(",")[-1].strip()
+    return request.client.host if request.client else "127.0.0.1"
+
+
 async def verify_rate_limit(request: Request):
-    client_ip = request.client.host if request.client else "127.0.0.1"
+    client_ip = get_client_ip(request)
     current_minute = int(time.time() / 60)
     redis_key = f"rate_limit:{client_ip}:{current_minute}"
     redis_client = request.app.state.redis
@@ -323,7 +332,7 @@ async def get_metrics(request: Request):
 
 @app.post("/login")
 async def login(req: LoginRequest, request: Request):
-    client_ip = request.client.host if request.client else "127.0.0.1"
+    client_ip = get_client_ip(request)
     redis_key = f"login_failures:{client_ip}"
     redis_client = request.app.state.redis
 

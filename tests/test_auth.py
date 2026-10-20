@@ -140,3 +140,23 @@ def test_successful_login_resets_failures(client):
         client.post("/login", json={"password": "nope"})
     assert client.post("/login", json={"password": "test-password"}).status_code == 200
     assert client.post("/login", json={"password": "nope"}).status_code == 401
+
+
+def test_forwarded_ip_ignored_by_default(client):
+    max_attempts = auth.get_settings().LOGIN_MAX_ATTEMPTS
+    for i in range(max_attempts):
+        client.post("/login", json={"password": "nope"}, headers={"X-Forwarded-For": f"10.0.0.{i}"})
+    assert client.post("/login", json={"password": "test-password"}).status_code == 429
+
+
+def test_forwarded_ip_used_when_trusted(client, monkeypatch):
+    monkeypatch.setattr(auth.get_settings(), "TRUST_PROXY_HEADERS", True)
+    max_attempts = auth.get_settings().LOGIN_MAX_ATTEMPTS
+    # A client-supplied first entry must not dodge the limit; the proxy-appended last entry counts.
+    for i in range(max_attempts):
+        headers = {"X-Forwarded-For": f"6.6.6.{i}, 203.0.113.1"}
+        assert client.post("/login", json={"password": "nope"}, headers=headers).status_code == 401
+    blocked = {"X-Forwarded-For": "1.2.3.4, 203.0.113.1"}
+    assert client.post("/login", json={"password": "test-password"}, headers=blocked).status_code == 429
+    other_user = {"X-Forwarded-For": "198.51.100.7"}
+    assert client.post("/login", json={"password": "test-password"}, headers=other_user).status_code == 200

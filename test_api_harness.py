@@ -4,9 +4,11 @@ import json
 from fastapi.testclient import TestClient
 from PIL import Image
 
+from api.auth import require_admin
 from api.main import app
 from shared.database import init_db
 
+app.dependency_overrides[require_admin] = lambda: {"sub": "admin"}
 client = TestClient(app)
 
 @pytest.fixture(autouse=True)

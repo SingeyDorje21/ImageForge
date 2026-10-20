@@ -1,4 +1,4 @@
-import os
+import io
 from PIL import Image, ImageDraw, ImageFilter, ImageFont, ImageOps
 
 FORMAT_EXT_MAP = {"jpg": "jpg", "jpeg": "jpg", "png": "png", "webp": "webp"}
@@ -69,9 +69,9 @@ def _prepare_for_save(img: Image.Image, save_format: str) -> Image.Image:
     return img
 
 
-def process_image(original_path: str, result_dir: str, job_id: str, ext: str, operations: list[dict]) -> str:
-    """Apply operations sequentially via Pillow. Returns the result file path."""
-    img = Image.open(original_path)
+def process_image(data: bytes, ext: str, operations: list[dict]) -> tuple[bytes, str]:
+    """Apply operations sequentially via Pillow. Returns (result bytes, result extension)."""
+    img = Image.open(io.BytesIO(data))
     result_ext = ext  # default to original extension
     exif = img.info.get("exif")  # carried through to the output unless stripped
     quality = 95
@@ -106,8 +106,6 @@ def process_image(original_path: str, result_dir: str, job_id: str, ext: str, op
         else:
             raise InvalidOperationError(f"Unknown operation type '{op_type}'")
 
-    result_path = os.path.join(result_dir, f"{job_id}{result_ext}")
-
     # Determine save format from extension
     save_format = result_ext.lstrip(".").upper()
     if save_format == "JPG":
@@ -122,6 +120,7 @@ def process_image(original_path: str, result_dir: str, job_id: str, ext: str, op
     if exif:
         save_kwargs["exif"] = exif
 
-    img.save(result_path, **save_kwargs)
+    out = io.BytesIO()
+    img.save(out, **save_kwargs)
     img.close()
-    return result_path
+    return out.getvalue(), result_ext

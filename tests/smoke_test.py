@@ -8,6 +8,7 @@ Usage:
 """
 
 import io
+import os
 import json
 import sys
 import time
@@ -16,8 +17,24 @@ from PIL import Image
 
 BASE_URL = "http://localhost:8000"
 
+
+def admin_headers() -> dict:
+    """Log in with ADMIN_PASSWORD from the environment for admin-only endpoints."""
+    password = os.environ.get("ADMIN_PASSWORD", "")
+    r = requests.post(f"{BASE_URL}/login", json={"password": password})
+    if r.status_code != 200:
+        return {}
+    return {"Authorization": f"Bearer {r.json()['token']}"}
+
 passed = 0
 failed = 0
+
+
+def open_result(job_data: dict) -> Image.Image:
+    """Download the result through its signed URL and open it."""
+    r = requests.get(job_data["result_url"], timeout=10)
+    r.raise_for_status()
+    return Image.open(io.BytesIO(r.content))
 
 
 def check(name: str, condition: bool, detail: str = ""):
@@ -93,7 +110,7 @@ def main():
         result_path = job_data.get("result_path")
         if result_path:
             try:
-                img = Image.open(result_path)
+                img = open_result(job_data)
                 check("Result image is 400x300", img.size == (400, 300), f"got {img.size}")
                 img.close()
             except Exception as e:
@@ -120,7 +137,7 @@ def main():
         if result_path:
             check("Result file ends with .webp", result_path.endswith(".webp"), f"got {result_path}")
             try:
-                img = Image.open(result_path)
+                img = open_result(job_data)
                 check("Result is valid WebP", img.format == "WEBP", f"got {img.format}")
                 img.close()
             except Exception as e:
@@ -142,7 +159,7 @@ def main():
         result_path = job_data.get("result_path")
         if result_path:
             try:
-                img = Image.open(result_path)
+                img = open_result(job_data)
                 check("Result is valid PNG", img.format == "PNG", f"got {img.format}")
                 img.close()
             except Exception as e:
@@ -167,7 +184,7 @@ def main():
         result_path = job_data.get("result_path")
         if result_path:
             try:
-                img = Image.open(result_path)
+                img = open_result(job_data)
                 check("Chained: 200x200", img.size == (200, 200), f"got {img.size}")
                 check("Chained: WebP format", img.format == "WEBP", f"got {img.format}")
                 img.close()
@@ -190,7 +207,7 @@ def main():
     check("GET non-existent job returns 404", r.status_code == 404)
 
     # List jobs with status filter
-    r = requests.get(f"{BASE_URL}/jobs", params={"status": "completed"})
+    r = requests.get(f"{BASE_URL}/jobs", headers=admin_headers(), params={"status": "completed"})
     check("GET /jobs?status=completed returns 200", r.status_code == 200)
     jobs_list = r.json()
     check("All returned jobs are completed",
@@ -198,7 +215,7 @@ def main():
           f"got statuses: {[j['status'] for j in jobs_list]}")
 
     # List jobs with limit
-    r = requests.get(f"{BASE_URL}/jobs", params={"limit": 5})
+    r = requests.get(f"{BASE_URL}/jobs", headers=admin_headers(), params={"limit": 5})
     check("GET /jobs?limit=5 returns <= 5 jobs", len(r.json()) <= 5, f"got {len(r.json())}")
 
     # --- 7. Error Handling ---

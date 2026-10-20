@@ -1,11 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { NavLink } from 'react-router-dom';
 import axios from 'axios';
 import OperationBuilder from '../components/OperationBuilder';
 import { newStep, toPayload } from '../lib/operations';
 import { UploadCloud, Server, Database, Activity, RefreshCw, Layers, Monitor, HardDrive, Download, CheckCircle, Clock, XCircle } from 'lucide-react';
 
-const API_BASE = 'http://localhost:8000';
+import { API_BASE } from '../config';
 
 const LandingPage = () => {
   const [file, setFile] = useState(null);
@@ -73,9 +72,6 @@ const LandingPage = () => {
         <nav className="hidden md:flex items-center gap-8 text-sm font-bold tracking-wider">
           <a href="#product" className="hover:text-primary transition-colors">PRODUCT</a>
           <a href="#network" className="hover:text-primary transition-colors">NETWORK</a>
-          <NavLink to="/login" className="bg-white text-black px-6 py-2 border-2 border-black hover:bg-transparent hover:text-white hover:border-white transition-all shadow-[4px_4px_0px_#f87171]">
-            ADMIN PORTAL
-          </NavLink>
         </nav>
       </header>
 
@@ -170,7 +166,7 @@ const LandingPage = () => {
 
               {activeJob.status === 'completed' && activeJob.result_path && (
                 <div className="mt-8 flex justify-center">
-                  <a href={`${API_BASE}/storage/results/${activeJob.result_path.split(/[\\/]/).pop()}`} download target="_blank" rel="noreferrer" className="w-full max-w-sm bg-success hover:bg-green-400 text-slate-900 font-black py-4 border-2 border-black transition-colors flex items-center justify-center gap-2 shadow-[4px_4px_0px_#16a34a] uppercase">
+                  <a href={activeJob.result_url} download target="_blank" rel="noreferrer" className="w-full max-w-sm bg-success hover:bg-green-400 text-slate-900 font-black py-4 border-2 border-black transition-colors flex items-center justify-center gap-2 shadow-[4px_4px_0px_#16a34a] uppercase">
                     <Download size={24} /> Download Result Image
                   </a>
                 </div>

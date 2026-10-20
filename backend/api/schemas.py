@@ -117,6 +117,7 @@ class JobStatusResponse(BaseModel):
     status: str
     original_filename: str
     result_path: str | None = None
+    result_url: str | None = None  # short-lived signed download URL
     operations: list[dict]
     retry_count: int
     error_message: str | None = None

@@ -7,12 +7,10 @@ from uuid import UUID
 from fastapi import FastAPI, Depends, File, Form, HTTPException, Query, UploadFile, status, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse
-import aio_pika
+from fastapi.responses import RedirectResponse
 import redis.asyncio as redis
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from fastapi.staticfiles import StaticFiles
 
 from api.schemas import (
     OPERATION_MODELS,
@@ -25,11 +23,13 @@ class LoginRequest(BaseModel):
     password: str
 from shared.database import get_db
 from shared.models import Job
+from shared import storage
+from shared.task_queue import create_queue
 from api.config import get_settings
+from api.auth import check_password, create_token, require_admin
 
 settings = get_settings()
 
-STORAGE_PATH = settings.STORAGE_PATH
 MAX_FILE_SIZE_MB = settings.MAX_FILE_SIZE_MB
 MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024
 
@@ -39,27 +39,10 @@ FORMAT_EXT_MAP = {"jpg": "jpg", "jpeg": "jpg", "png": "png", "webp": "webp"}
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    os.makedirs(os.path.join(STORAGE_PATH, "originals"), exist_ok=True)
-    os.makedirs(os.path.join(STORAGE_PATH, "results"), exist_ok=True)
-    
-    rabbitmq_connection = await aio_pika.connect_robust(settings.RABBITMQ_URL)
-    rabbitmq_channel = await rabbitmq_connection.channel()
-    
-    await rabbitmq_channel.declare_queue(settings.DLQ_NAME, durable=True)
-    await rabbitmq_channel.declare_queue(
-        settings.RETRY_QUEUE_NAME, 
-        durable=True,
-        arguments={
-            "x-dead-letter-exchange": "",
-            "x-dead-letter-routing-key": settings.QUEUE_NAME,
-            "x-message-ttl": 5000,
-        }
-    )
-    rabbitmq_queue = await rabbitmq_channel.declare_queue(settings.QUEUE_NAME, durable=True)
-    
-    app.state.rabbitmq_channel = rabbitmq_channel
-    app.state.rabbitmq_queue = rabbitmq_queue
-    app.state.rabbitmq_connection = rabbitmq_connection
+    if settings.S3_CREATE_BUCKET:
+        await run_in_threadpool(storage.ensure_bucket)
+
+    app.state.job_queue = await create_queue(settings)
 
     redis_pool = redis.ConnectionPool.from_url(settings.REDIS_URL, decode_responses=True)
     redis_client = redis.Redis(connection_pool=redis_pool)
@@ -67,7 +50,7 @@ async def lifespan(app: FastAPI):
     
     yield
     
-    await rabbitmq_connection.close()
+    await app.state.job_queue.close()
     await redis_client.aclose()
 
 
@@ -80,18 +63,48 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=settings.cors_origins,
+    allow_credentials=False,
+    allow_methods=["GET", "POST"],
+    allow_headers=["Authorization", "Content-Type"],
 )
 
-os.makedirs(STORAGE_PATH, exist_ok=True)
-app.mount("/storage", StaticFiles(directory=STORAGE_PATH), name="storage")
+CONTENT_TYPES = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp"}
+
+
+def _job_response(job: Job) -> JobStatusResponse:
+    return JobStatusResponse(
+        job_id=job.id,
+        status=job.status,
+        original_filename=job.original_filename,
+        result_path=job.result_path,
+        operations=job.operations,
+        retry_count=job.retry_count,
+        error_message=job.error_message,
+        created_at=job.created_at,
+        updated_at=job.updated_at,
+    )
+
+
+def _with_result_url(response: JobStatusResponse) -> JobStatusResponse:
+    # Signed URLs expire, so they are minted per request and never cached.
+    if response.result_path:
+        name = os.path.basename(response.result_path)
+        response.result_url = storage.presigned_url(response.result_path, download_name=name)
+    return response
+
+
+def get_client_ip(request: Request) -> str:
+    if settings.TRUST_PROXY_HEADERS:
+        forwarded = request.headers.get("x-forwarded-for")
+        if forwarded:
+            # The proxy appends the address it saw; earlier entries can be forged by the client.
+            return forwarded.split(",")[-1].strip()
+    return request.client.host if request.client else "127.0.0.1"
 
 
 async def verify_rate_limit(request: Request):
-    client_ip = request.client.host if request.client else "127.0.0.1"
+    client_ip = get_client_ip(request)
     current_minute = int(time.time() / 60)
     redis_key = f"rate_limit:{client_ip}:{current_minute}"
     redis_client = request.app.state.redis
@@ -101,11 +114,11 @@ async def verify_rate_limit(request: Request):
     if count == 1:
         await redis_client.expire(redis_key, 60)
         
-    if count > 10:
+    if count > settings.RATE_LIMIT_PER_MINUTE:
         await redis_client.incr("metrics:rate_limit:hits")
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail="Rate limit exceeded. Maximum 10 uploads per minute.",
+            detail=f"Rate limit exceeded. Maximum {settings.RATE_LIMIT_PER_MINUTE} uploads per minute.",
         )
 
 
@@ -184,8 +197,6 @@ async def create_job(
         )
 
     ops_validated = _parse_operations(operations)
-    original_dir = f"{STORAGE_PATH}/originals"
-    
     job = Job(
         original_filename=safe_filename,
         original_path="",
@@ -197,26 +208,16 @@ async def create_job(
     await db.refresh(job)
 
     job_id_str = str(job.id)
-    original_path = f"{original_dir}/{job_id_str}{ext}"
+    original_path = f"originals/{job_id_str}{ext}"
 
     try:
-        with open(original_path, "wb") as f:
-            f.write(content)
+        await run_in_threadpool(storage.upload_bytes, original_path, content, CONTENT_TYPES.get(ext))
 
         job.original_path = original_path
         await db.commit()
         await db.refresh(job)
 
-        channel = request.app.state.rabbitmq_channel
-        message_body = json.dumps({"job_id": job_id_str}).encode()
-        message = aio_pika.Message(
-            body=message_body,
-            delivery_mode=aio_pika.DeliveryMode.PERSISTENT,
-        )
-        await channel.default_exchange.publish(
-            message,
-            routing_key=settings.QUEUE_NAME,
-        )
+        await request.app.state.job_queue.publish(job_id_str)
         
         # Metrics: Queued
         await request.app.state.redis.incr("metrics:jobs:queued")
@@ -239,7 +240,7 @@ async def get_job(job_id: UUID, request: Request, db: AsyncSession = Depends(get
     cached_data = await redis_client.get(cache_key)
     if cached_data:
         try:
-            return JobStatusResponse.model_validate_json(cached_data)
+            return _with_result_url(JobStatusResponse.model_validate_json(cached_data))
         except Exception:
             pass
             
@@ -251,25 +252,29 @@ async def get_job(job_id: UUID, request: Request, db: AsyncSession = Depends(get
             detail=f"Job {job_id} not found",
         )
         
-    response = JobStatusResponse(
-        job_id=job.id,
-        status=job.status,
-        original_filename=job.original_filename,
-        result_path=job.result_path,
-        operations=job.operations,
-        retry_count=job.retry_count,
-        error_message=job.error_message,
-        created_at=job.created_at,
-        updated_at=job.updated_at,
-    )
+    response = _job_response(job)
     
     if job.status in ("completed", "failed"):
         await redis_client.setex(cache_key, 3600, response.model_dump_json())
         
-    return response
+    return _with_result_url(response)
 
 
-@app.get("/jobs", response_model=list[JobStatusResponse])
+@app.get("/jobs/{job_id}/download")
+async def download_job_result(job_id: UUID, db: AsyncSession = Depends(get_db)):
+    """Redirect to a signed URL for the job's result image."""
+    result = await db.execute(select(Job).where(Job.id == job_id))
+    job = result.scalars().first()
+    if not job or not job.result_path:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No result for job {job_id}",
+        )
+    url = storage.presigned_url(job.result_path, download_name=os.path.basename(job.result_path))
+    return RedirectResponse(url, status_code=status.HTTP_307_TEMPORARY_REDIRECT)
+
+
+@app.get("/jobs", response_model=list[JobStatusResponse], dependencies=[Depends(require_admin)])
 async def list_jobs(
     status_filter: str | None = Query(None, alias="status"),
     limit: int = Query(20, ge=1, le=100),
@@ -282,23 +287,10 @@ async def list_jobs(
 
     result = await db.execute(query)
     jobs = result.scalars().all()
-    return [
-        JobStatusResponse(
-            job_id=j.id,
-            status=j.status,
-            original_filename=j.original_filename,
-            result_path=j.result_path,
-            operations=j.operations,
-            retry_count=j.retry_count,
-            error_message=j.error_message,
-            created_at=j.created_at,
-            updated_at=j.updated_at,
-        )
-        for j in jobs
-    ]
+    return [_with_result_url(_job_response(j)) for j in jobs]
 
 
-@app.get("/metrics")
+@app.get("/metrics", dependencies=[Depends(require_admin)])
 async def get_metrics(request: Request):
     """Retrieve global system metrics from Redis."""
     redis_client = request.app.state.redis
@@ -322,7 +314,27 @@ async def get_metrics(request: Request):
 
 
 @app.post("/login")
-async def login(req: LoginRequest):
-    if req.password == settings.ADMIN_PASSWORD:
-        return {"token": "admin-token-xyz"}
+async def login(req: LoginRequest, request: Request):
+    client_ip = get_client_ip(request)
+    redis_key = f"login_failures:{client_ip}"
+    redis_client = request.app.state.redis
+
+    failures = int(await redis_client.get(redis_key) or 0)
+    if failures >= settings.LOGIN_MAX_ATTEMPTS:
+        retry_after = await redis_client.ttl(redis_key)
+        await redis_client.incr("metrics:login_rate_limit:hits")
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many failed login attempts. Try again later.",
+            headers={"Retry-After": str(max(retry_after, 1))},
+        )
+
+    if check_password(req.password):
+        await redis_client.delete(redis_key)
+        token, expires_in = create_token()
+        return {"token": token, "token_type": "bearer", "expires_in": expires_in}
+
+    count = await redis_client.incr(redis_key)
+    if count == 1:
+        await redis_client.expire(redis_key, settings.LOGIN_WINDOW_SECONDS)
     raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid password")

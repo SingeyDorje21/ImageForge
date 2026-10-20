@@ -1,24 +1,18 @@
 FROM python:3.12-slim AS base
 
-# Install system dependencies for Pillow
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    libjpeg62-turbo-dev \
-    libwebp-dev \
-    zlib1g-dev \
-    && rm -rf /var/lib/apt/lists/*
+# Pillow's manylinux wheels bundle libjpeg/libwebp/zlib, so no apt packages are needed
+ENV PYTHONUNBUFFERED=1
 
 WORKDIR /app
 
+# Build context is the repo root; the backend lives under backend/
 # Install Python dependencies
-COPY requirements.txt .
+COPY backend/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
-COPY api/ ./api/
-COPY shared/ ./shared/
-COPY worker/ ./worker/
-
-# Create storage directories
-RUN mkdir -p storage/originals storage/results
+COPY backend/api/ ./api/
+COPY backend/shared/ ./shared/
+COPY backend/worker/ ./worker/
 
 CMD ["python", "-m", "worker.main"]

@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
 
-const API_BASE = 'http://localhost:8000';
+import { API_BASE } from '../config';
 
 const Login = ({ onLogin }) => {
   const [password, setPassword] = useState('');
@@ -19,10 +19,15 @@ const Login = ({ onLogin }) => {
       if (res.data.token) {
         localStorage.setItem('imageforge_token', res.data.token);
         onLogin();
-        navigate('/');
+        navigate('/admin');
       }
     } catch (err) {
-      setError('Invalid admin password.');
+      const status = err.response?.status;
+      setError(status === 503
+        ? 'Admin login is not configured on the server.'
+        : status === 429
+          ? 'Too many failed attempts. Try again later.'
+          : 'Invalid admin password.');
     } finally {
       setLoading(false);
     }

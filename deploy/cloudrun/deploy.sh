@@ -102,4 +102,4 @@ echo
 echo "Done."
 echo "  API:    $API_URL"
 echo "  Worker: $WORKER_URL (private)"
-echo "Build the frontend on Cloudflare Pages with VITE_API_URL=$API_URL"
+echo "Set VITE_API_URL=$API_URL in your Vercel project and redeploy the frontend"

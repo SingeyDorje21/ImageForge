@@ -34,9 +34,10 @@ the default) so everything runs offline.
 1. **Google Cloud**: create a project with billing enabled. Install the
    [gcloud CLI](https://cloud.google.com/sdk/docs/install) and run `gcloud auth login`,
    or use Cloud Shell (it has gcloud and bash ready).
-2. **Neon**: create a project and database. Copy the *direct* connection string
-   (not the `-pooler` host; asyncpg's prepared statements don't work through PgBouncer).
-   Change `postgresql://` to `postgresql+asyncpg://` and `sslmode=require` to `ssl=require`.
+2. **Neon**: create a project and database. Copy the connection string exactly as
+   Neon shows it. The pooled one (host contains `-pooler`) is recommended for Cloud Run;
+   the app turns off asyncpg's prepared-statement cache for pooled hosts and converts
+   the URL for asyncpg itself.
 3. **Upstash**: create a Redis database in the region closest to your Cloud Run region
    and copy its `rediss://` URL.
 4. **Cloudflare R2**: create a bucket, then an R2 API token with Object Read & Write

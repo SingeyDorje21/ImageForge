@@ -13,7 +13,7 @@ from PIL import UnidentifiedImageError
 from api.config import get_settings
 from shared.database import async_session_maker
 from shared.models import Job
-from worker.processor import process_image
+from worker.processor import InvalidOperationError, process_image
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -80,7 +80,7 @@ async def process_job(message: aio_pika.IncomingMessage, channel: aio_pika.Chann
                 duration = time.time() - start_time
                 await redis_client.incrbyfloat("metrics:jobs:total_time_sec", duration)
 
-            except UnidentifiedImageError as e:
+            except (UnidentifiedImageError, InvalidOperationError) as e:
                 logger.error(f"Job {job_id} failed (unrecoverable): {e}")
                 job.status = "failed"
                 job.error_message = f"Unrecoverable: {e}"

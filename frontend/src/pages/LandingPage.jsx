@@ -1,16 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import { NavLink } from 'react-router-dom';
 import axios from 'axios';
+import OperationBuilder from '../components/OperationBuilder';
+import { newStep, toPayload } from '../lib/operations';
 import { UploadCloud, Server, Database, Activity, RefreshCw, Layers, Monitor, HardDrive, Download, CheckCircle, Clock, XCircle } from 'lucide-react';
 
 const API_BASE = 'http://localhost:8000';
 
 const LandingPage = () => {
   const [file, setFile] = useState(null);
-  const [opType, setOpType] = useState('resize');
-  const [width, setWidth] = useState(400);
-  const [height, setHeight] = useState(400);
-  const [format, setFormat] = useState('webp');
+  const [steps, setSteps] = useState(() => [newStep('resize')]);
   const [uploading, setUploading] = useState(false);
   const [activeJob, setActiveJob] = useState(null);
 
@@ -31,20 +30,14 @@ const LandingPage = () => {
 
   const handleUpload = async (e) => {
     e.preventDefault();
-    if (!file) return;
+    if (!file || steps.length === 0) return;
     
     setUploading(true);
     setActiveJob(null);
     const formData = new FormData();
     formData.append('file', file);
     
-    let ops = [];
-    if (opType === 'resize') {
-      ops.push({ type: 'resize', width: parseInt(width), height: parseInt(height) });
-    } else {
-      ops.push({ type: 'format_convert', target_format: format });
-    }
-    formData.append('operations', JSON.stringify(ops));
+    formData.append('operations', JSON.stringify(toPayload(steps)));
 
     try {
       const res = await axios.post(`${API_BASE}/jobs`, formData);
@@ -52,7 +45,8 @@ const LandingPage = () => {
       // Immediately set the job to start polling
       setActiveJob({ job_id: res.data.job_id, status: 'pending' });
     } catch (err) {
-      alert(err.response?.data?.detail || 'Upload failed');
+      const detail = err.response?.data?.detail;
+      alert(typeof detail === 'string' ? detail : 'Upload failed');
     } finally {
       setUploading(false);
     }
@@ -128,29 +122,18 @@ const LandingPage = () => {
                   </span>
                 </div>
                 
-                <div className="grid grid-cols-2 gap-4">
-                  <select value={opType} onChange={e => setOpType(e.target.value)} className="col-span-2 bg-black border-2 border-[#333] p-3 text-sm font-bold uppercase focus:border-primary outline-none">
-                    <option value="resize">RESIZE</option>
-                    <option value="format_convert">CONVERT</option>
-                  </select>
-
-                  {opType === 'resize' ? (
-                    <>
-                      <input type="number" placeholder="W" value={width} onChange={e => setWidth(e.target.value)} className="bg-black border-2 border-[#333] p-3 text-sm font-bold uppercase focus:border-primary outline-none" />
-                      <input type="number" placeholder="H" value={height} onChange={e => setHeight(e.target.value)} className="bg-black border-2 border-[#333] p-3 text-sm font-bold uppercase focus:border-primary outline-none" />
-                    </>
-                  ) : (
-                    <select value={format} onChange={e => setFormat(e.target.value)} className="col-span-2 bg-black border-2 border-[#333] p-3 text-sm font-bold uppercase focus:border-primary outline-none">
-                      <option value="webp">WEBP</option>
-                      <option value="png">PNG</option>
-                      <option value="jpg">JPG</option>
-                    </select>
-                  )}
-                </div>
+                <OperationBuilder
+                  steps={steps}
+                  onChange={setSteps}
+                  inputClass="w-full bg-black border-2 border-[#333] p-2 text-sm font-bold focus:border-primary outline-none"
+                  labelClass="text-xs font-black uppercase tracking-wider"
+                  stepClass="border-2 border-[#333] bg-black p-3 text-gray-300"
+                  buttonClass="bg-white text-black font-black uppercase text-xs px-3 border-2 border-black hover:bg-gray-200"
+                />
 
                 <button 
                   type="submit" 
-                  disabled={uploading || !file}
+                  disabled={uploading || !file || steps.length === 0}
                   className="w-full bg-yellow-400 text-black font-black uppercase py-4 border-2 border-black hover:bg-yellow-300 transition-colors mt-4 disabled:opacity-50"
                 >
                   {uploading ? 'UPLOADING...' : 'START PROCESSING'}

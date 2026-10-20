@@ -227,7 +227,7 @@ def main():
     r = requests.post(
         f"{BASE_URL}/jobs",
         files={"file": (f"test{ext}", buf, "image/png")},
-        data={"operations": json.dumps([{"type": "blur", "radius": 5}])},
+        data={"operations": json.dumps([{"type": "teleport", "distance": 5}])},
     )
     check("Unknown operation type returns 422", r.status_code == 422, f"got {r.status_code}")
 

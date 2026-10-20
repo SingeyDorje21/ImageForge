@@ -84,7 +84,7 @@ def test_f2_mismatched_extension_vs_content(api_client, image_factory):
 def test_f3_unknown_operation_type(api_client, image_factory):
     img = image_factory()
     files = {"file": ("image.png", img, "image/png")}
-    data = {"operations": json.dumps([{"type": "rotate", "degrees": 90}])}
+    data = {"operations": json.dumps([{"type": "teleport", "distance": 90}])}
     resp = api_client.post("/jobs", files=files, data=data)
     assert resp.status_code == 422
 

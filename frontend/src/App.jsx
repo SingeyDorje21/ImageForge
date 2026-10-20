@@ -1,10 +1,13 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, lazy, Suspense } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
-import AdminLayout from './layouts/AdminLayout';
-import Overview from './pages/Overview';
-import QueueMonitor from './pages/QueueMonitor';
-import Login from './pages/Login';
 import LandingPage from './pages/LandingPage';
+import { getToken } from './auth';
+
+// Admin pages load on demand so the public page doesn't ship the chart library.
+const AdminLayout = lazy(() => import('./layouts/AdminLayout'));
+const Overview = lazy(() => import('./pages/Overview'));
+const QueueMonitor = lazy(() => import('./pages/QueueMonitor'));
+const Login = lazy(() => import('./pages/Login'));
 
 const ProtectedRoute = ({ children, isAuthenticated }) => {
   if (!isAuthenticated) return <Navigate to="/login" replace />;
@@ -12,15 +15,12 @@ const ProtectedRoute = ({ children, isAuthenticated }) => {
 };
 
 function App() {
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
-
-  useEffect(() => {
-    const token = localStorage.getItem('imageforge_token');
-    if (token) setIsAuthenticated(true);
-  }, []);
+  // Read the token on first render so a reload of an admin page doesn't bounce through /login.
+  const [isAuthenticated, setIsAuthenticated] = useState(() => Boolean(getToken()));
 
   return (
     <Router>
+      <Suspense fallback={null}>
       <Routes>
         <Route path="/" element={<LandingPage />} />
         <Route path="/login" element={
@@ -43,6 +43,7 @@ function App() {
           </ProtectedRoute>
         } />
       </Routes>
+      </Suspense>
     </Router>
   );
 }

@@ -75,7 +75,7 @@ def test_old_default_password_rejected(client):
     assert client.post("/login", json={"password": "imageforge_admin_123"}).status_code == 401
 
 
-@pytest.mark.parametrize("path", ["/metrics", "/jobs"])
+@pytest.mark.parametrize("path", ["/metrics", "/jobs", "/stats"])
 def test_admin_endpoints_require_token(client, path):
     assert client.get(path).status_code == 401
 
@@ -160,3 +160,25 @@ def test_forwarded_ip_used_when_trusted(client, monkeypatch):
     assert client.post("/login", json={"password": "test-password"}, headers=blocked).status_code == 429
     other_user = {"X-Forwarded-For": "198.51.100.7"}
     assert client.post("/login", json={"password": "test-password"}, headers=other_user).status_code == 200
+
+
+def test_stats_returns_aggregates(client, token, monkeypatch):
+    from api import stats
+    from shared.database import get_db
+
+    async def fake_rows(db, since):
+        return []
+
+    async def no_db():
+        yield None
+
+    monkeypatch.setattr(stats, "fetch_rows", fake_rows)
+    app.dependency_overrides[get_db] = no_db
+    try:
+        resp = client.get("/stats?days=1", headers={"Authorization": f"Bearer {token}"})
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["granularity"] == "hour"
+    assert body["totals"]["jobs"] == 0

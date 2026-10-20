@@ -1,6 +1,7 @@
 import json
 import os
 import time
+from datetime import datetime, timedelta, timezone
 from contextlib import asynccontextmanager
 from uuid import UUID
 
@@ -27,6 +28,7 @@ from shared import storage
 from shared.task_queue import create_queue
 from api.config import get_settings
 from api.auth import check_password, create_token, require_admin
+from api import stats
 
 settings = get_settings()
 
@@ -311,6 +313,17 @@ async def get_metrics(request: Request):
         "rate_limit_hits": int(rate_limits),
         "avg_processing_time_sec": avg_time
     }
+
+
+@app.get("/stats", dependencies=[Depends(require_admin)])
+async def get_stats(
+    days: int = Query(7, ge=1, le=90),
+    db: AsyncSession = Depends(get_db),
+):
+    """Job analytics over the last `days` days, aggregated from the jobs table."""
+    now = datetime.now(timezone.utc)
+    rows = await stats.fetch_rows(db, now - timedelta(days=days))
+    return stats.compute_stats(rows, now, days)
 
 
 @app.post("/login")

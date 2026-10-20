@@ -1,24 +1,31 @@
 /** @type {import('tailwindcss').Config} */
+const token = (name) => `rgb(var(--${name}) / <alpha-value>)`;
+
 export default {
+  darkMode: 'class',
   content: [
     "./index.html",
     "./src/**/*.{js,ts,jsx,tsx}",
   ],
   theme: {
     extend: {
+      // Colors are CSS variables so light and dark mode share one set of class names (see index.css).
       colors: {
-        background: '#0f172a',
-        panel: '#1e293b',
-        border: 'rgba(255, 255, 255, 0.1)',
-        primary: '#38bdf8',
-        success: '#4ade80',
-        danger: '#f87171',
-        warning: '#fbbf24',
-        textMuted: '#94a3b8'
+        background: token('bg'),
+        surface: token('surface'),
+        subtle: token('subtle'),
+        fg: token('fg'),
+        muted: token('muted'),
+        line: token('line'),
+        accent: token('accent'),
+        'accent-fg': token('accent-fg'),
+        success: token('success'),
+        danger: token('danger'),
+        warning: token('warning'),
       },
       fontFamily: {
-        sans: ['Inter', 'sans-serif'],
-      }
+        sans: ['Inter', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+      },
     },
   },
   plugins: [],

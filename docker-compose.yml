@@ -1,3 +1,16 @@
+x-backend-env: &backend-env
+  DATABASE_URL: postgresql+asyncpg://imageforge:imageforge@postgres:5432/imageforge
+  RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+  REDIS_URL: redis://redis:6379/0
+  QUEUE_NAME: image_jobs
+  S3_BUCKET: imageforge
+  S3_ENDPOINT_URL: http://s3:8333
+  S3_PUBLIC_ENDPOINT_URL: http://localhost:8333
+  S3_REGION: us-east-1
+  S3_ACCESS_KEY_ID: imageforge
+  S3_SECRET_ACCESS_KEY: imageforge-secret
+  S3_FORCE_PATH_STYLE: "true"
+
 services:
   postgres:
     image: postgres:15-alpine
@@ -36,22 +49,73 @@ services:
       timeout: 5s
       retries: 5
 
+  # Local S3-compatible stand-in for S3 / R2 / GCS / Spaces
+  s3:
+    image: chrislusf/seaweedfs:latest
+    command: server -dir=/data -s3 -s3.port=8333 -s3.config=/etc/seaweedfs/s3.json
+    ports:
+      - "8333:8333"
+    volumes:
+      - s3_data:/data
+      - ./infra/seaweedfs-s3.json:/etc/seaweedfs/s3.json:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:8333/healthz || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.api
+    environment:
+      <<: *backend-env
+      CORS_ORIGINS: http://localhost:5173
+      S3_CREATE_BUCKET: "true"
+      # Admin login stays disabled until these are set in your shell or a root .env
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      JWT_SECRET: ${JWT_SECRET:-}
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      s3:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   worker:
     build:
       context: .
       dockerfile: Dockerfile.worker
     environment:
-      - DATABASE_URL=postgresql+asyncpg://imageforge:imageforge@postgres:5432/imageforge
-      - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672/
-      - QUEUE_NAME=image_jobs
-      - STORAGE_PATH=./storage
-    volumes:
-      - ./storage:/app/storage
+      <<: *backend-env
     depends_on:
-      postgres:
+      api:
+        condition: service_healthy
+      redis:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
 
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        VITE_API_URL: http://localhost:8000
+    ports:
+      - "5173:80"
+    depends_on:
+      - api
+
 volumes:
   postgres_data:
+  s3_data:

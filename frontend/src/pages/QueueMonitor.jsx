@@ -3,7 +3,7 @@ import axios from 'axios';
 import { authHeaders, handleAuthError } from '../auth';
 import { Layers, Play, RefreshCw, X, Download } from 'lucide-react';
 
-const API_BASE = 'http://localhost:8000';
+import { API_BASE } from '../config';
 
 const QueueMonitor = () => {
   const [jobs, setJobs] = useState([]);
@@ -219,14 +219,14 @@ const QueueMonitor = () => {
             <p className="text-sm text-textMuted mb-6 font-mono">{selectedJob.job_id}</p>
             
             <div className="w-full aspect-video bg-black/50 rounded-lg flex items-center justify-center mb-6 overflow-hidden border border-border relative group">
-              <img src={`${API_BASE}/storage/results/${selectedJob.result_path.split(/[\\/]/).pop()}`} alt="Result" className="max-w-full max-h-full object-contain" />
+              <img src={selectedJob.result_url} alt="Result" className="max-w-full max-h-full object-contain" />
               <div className="absolute inset-0 bg-black/60 flex flex-col items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
                  <span className="text-white text-sm font-bold mb-2">Processed Image</span>
                  <p className="text-xs font-mono text-primary break-all">{selectedJob.result_path.split(/[\\/]/).pop()}</p>
               </div>
             </div>
 
-            <a href={`${API_BASE}/storage/results/${selectedJob.result_path.split(/[\\/]/).pop()}`} download target="_blank" rel="noreferrer" className="w-full bg-success hover:bg-green-400 text-slate-900 font-bold py-3 rounded transition-colors flex items-center justify-center gap-2 shadow-[0_0_15px_rgba(74,222,128,0.3)]">
+            <a href={selectedJob.result_url} download target="_blank" rel="noreferrer" className="w-full bg-success hover:bg-green-400 text-slate-900 font-bold py-3 rounded transition-colors flex items-center justify-center gap-2 shadow-[0_0_15px_rgba(74,222,128,0.3)]">
               <Download size={20} /> Download Image
             </a>
           </div>

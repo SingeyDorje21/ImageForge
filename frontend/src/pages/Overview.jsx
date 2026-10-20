@@ -17,7 +17,7 @@ ChartJS.register(CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend)
 ChartJS.defaults.color = '#94a3b8';
 ChartJS.defaults.font.family = 'Inter';
 
-const API_BASE = 'http://localhost:8000';
+import { API_BASE } from '../config';
 
 const StatCard = ({ title, value, subtext, colorClass }) => (
   <div className="glass-panel p-6 border-t-2" style={{ borderTopColor: colorClass }}>

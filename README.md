@@ -11,10 +11,10 @@
 At its core, ImageFlow embraces a highly decoupled microservices architecture:
 
 1. **The Client (React SPA)**: End-users upload images and processing instructions (e.g., "convert to WebP", "resize to 800x600") via a stunning, responsive landing page.
-2. **API Hub (FastAPI)**: The central gateway. It intercepts uploads, enforces rate-limiting via **Redis**, saves the original file to disk, logs a `pending` job in **PostgreSQL**, and publishes the `job_id` to a message queue.
-3. **Message Queue (RabbitMQ)**: Acts as the robust buffer. It guarantees message delivery and handles Dead Letter Queues (DLQ) for failed jobs.
-4. **Worker Nodes (Python Async)**: Dedicated headless processors subscribe to the RabbitMQ queue. They pull the original image, perform the heavy CPU-bound image operations using **Pillow**, save the result, and update the PostgreSQL database state to `completed`.
-5. **Real-time Sync**: The frontend continuously polls the API to visually represent the processing timeline and dynamically unlocks a download link the moment the worker node finishes the job.
+2. **API Hub (FastAPI)**: The central gateway. It intercepts uploads, enforces rate-limiting via **Redis**, saves the original file to S3-compatible object storage, logs a `pending` job in **PostgreSQL**, and publishes the `job_id` to a message queue.
+3. **Message Queue (RabbitMQ locally, Google Cloud Tasks in production)**: Acts as the robust buffer. It guarantees delivery and retries failed jobs with backoff; RabbitMQ also keeps a Dead Letter Queue (DLQ).
+4. **Worker Nodes (Python Async)**: Dedicated headless processors subscribe to the RabbitMQ queue. They pull the original image, perform the heavy CPU-bound image operations using **Pillow**, upload the result to object storage, and update the PostgreSQL database state to `completed`.
+5. **Real-time Sync**: The frontend continuously polls the API to visually represent the processing timeline and dynamically unlocks a short-lived signed download link the moment the worker node finishes the job.
 
 ### System Diagram
 
@@ -45,63 +45,55 @@ At its core, ImageFlow embraces a highly decoupled microservices architecture:
 
 ## 🚀 How to Run Locally
 
-Follow these steps to launch the entire distributed architecture on your own machine.
-
-### Prerequisites
-- [Docker & Docker Compose](https://www.docker.com/) (Must be running on your system)
-- [Python 3.10+](https://www.python.org/)
-- [Node.js & npm](https://nodejs.org/)
-
-### 1. Start the Infrastructure (Docker)
-First, spin up PostgreSQL, Redis, and RabbitMQ using Docker Compose.
-
+### Option A: everything in Docker
 ```bash
-# From the project root directory
-docker-compose up -d
+docker compose up -d --build
 ```
-> Wait a few seconds for the database and broker to initialize and report healthy.
+This starts Postgres, Redis, RabbitMQ, a local S3-compatible store (SeaweedFS), the API, the worker and the frontend. The API applies Alembic migrations on startup and creates the bucket.
 
-### 2. Launch the API & Worker (Backend)
-Open a terminal, navigate to the `backend` folder, and run the FastAPI server and the background worker.
+- Frontend: `http://localhost:5173/` (admin at `/login`; set `ADMIN_PASSWORD` and `JWT_SECRET` in your shell or a root `.env` before `docker compose up`, or login stays disabled)
+- API docs: `http://localhost:8000/docs`
 
+### Option B: infra in Docker, app on your machine
 ```bash
-cd backend
+docker compose up -d postgres redis rabbitmq s3
 
-# Create a virtual environment and install dependencies
-python -m venv venv
-.\venv\Scripts\activate  # On Windows
-# source venv/bin/activate  # On macOS/Linux
+cd backend
+python -m venv venv && source venv/bin/activate   # .\venv\Scripts\activate on Windows
 pip install -r requirements.txt
+cp .env.example .env   # then set ADMIN_PASSWORD and JWT_SECRET, see "Security configuration"
+alembic upgrade head
+uvicorn api.main:app --reload --port 8000        # terminal 1
+python -m worker.main                            # terminal 2
 
-# Configure secrets: copy the example and set ADMIN_PASSWORD and JWT_SECRET
-cp .env.example .env
-# Generate a signing secret with:
-#   python -c "import secrets; print(secrets.token_urlsafe(48))"
-
-# Start the FastAPI Server (Port 8000)
-uvicorn api.main:app --reload --port 8000
+cd ../frontend && npm install && npm run dev     # terminal 3
 ```
 
-Open a **new terminal** for the worker:
-```bash
-cd backend
-.\venv\Scripts\activate
-# Start the asynchronous worker node
-python -m worker.main
-```
+## ☁️ Configuration for deployment
 
-### 3. Launch the Client (Frontend)
-Open a **third terminal**, navigate to the `frontend` folder, and start the React app.
+To deploy to Google Cloud Run with everything scaled to zero when idle (Cloud Tasks, Neon, Upstash, Cloudflare R2 and Pages), follow [deploy/cloudrun/README.md](deploy/cloudrun/README.md).
 
-```bash
-cd frontend
+There are two worker entrypoints: `python -m worker.main` consumes RabbitMQ (local and compose), and `uvicorn worker.server:app` is the HTTP worker Cloud Tasks pushes to.
 
-# Install dependencies
-npm install
+Files live in any S3-compatible bucket (AWS S3, Cloudflare R2, Google Cloud Storage, DigitalOcean Spaces, MinIO, SeaweedFS). Results are served through signed URLs; `GET /jobs/{id}` returns `result_url`, and `GET /jobs/{id}/download` redirects to it.
 
-# Start the Vite development server
-npm run dev
-```
+| Variable | Used by | Purpose |
+| --- | --- | --- |
+| `DATABASE_URL`, `REDIS_URL` | API, worker | Backing services |
+| `QUEUE_BACKEND` | API | `rabbitmq` (default, local) or `cloudtasks` (Cloud Run) |
+| `RABBITMQ_URL` | API, worker | Broker for `QUEUE_BACKEND=rabbitmq` |
+| `GCP_PROJECT`, `GCP_LOCATION`, `CLOUD_TASKS_QUEUE` | API | Cloud Tasks queue for `QUEUE_BACKEND=cloudtasks` |
+| `WORKER_URL`, `TASKS_SERVICE_ACCOUNT` | API | HTTP worker that Cloud Tasks calls, and the account that signs its OIDC token |
+| `S3_BUCKET`, `S3_REGION` | API, worker | Bucket to store originals and results |
+| `S3_ENDPOINT_URL` | API, worker | Leave unset for AWS S3; set for R2, GCS, Spaces, MinIO |
+| `S3_PUBLIC_ENDPOINT_URL` | API | Host put in signed URLs when browsers reach storage on a different host |
+| `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY` | API, worker | Storage credentials (omit to use the cloud's IAM role) |
+| `S3_FORCE_PATH_STYLE` | API, worker | `true` for MinIO/SeaweedFS |
+| `S3_URL_EXPIRY_SECONDS` | API | Lifetime of signed download URLs (default 3600) |
+| `S3_CREATE_BUCKET` | API | Create the bucket on startup (local dev) |
+| `RATE_LIMIT_PER_MINUTE` | API | Uploads per client IP per minute (default 10) |
+| `RUN_MIGRATIONS` | API image | `false` to skip `alembic upgrade head` on startup |
+| `VITE_API_URL` | frontend build | Public URL of the API, baked in at build time |
 
 ### Security configuration
 | Variable | Purpose |
@@ -114,11 +106,6 @@ npm run dev
 | `CORS_ORIGINS` | Comma-separated browser origins allowed to call the API (default `http://localhost:5173`). |
 
 `GET /jobs` and `GET /metrics` require an `Authorization: Bearer <token>` header obtained from `POST /login`.
-
-### 4. Access the System
-- **Public Landing Page**: Navigate to `http://localhost:5173/` to upload tasks and view the animated architecture pipeline.
-- **Admin Portal**: Navigate to `http://localhost:5173/login` and sign in with the `ADMIN_PASSWORD` you set in `backend/.env` to view real-time metrics and manage the queue.
-- **API Documentation**: Navigate to `http://localhost:8000/docs` to interact with the auto-generated Swagger UI.
 
 ---
 *Developed as a showcase for high-performance, asynchronous system design.*

@@ -1,11 +1,7 @@
 FROM python:3.12-slim AS base
 
-# Install system dependencies for Pillow
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    libjpeg62-turbo-dev \
-    libwebp-dev \
-    zlib1g-dev \
-    && rm -rf /var/lib/apt/lists/*
+# Pillow's manylinux wheels bundle libjpeg/libwebp/zlib, so no apt packages are needed
+ENV PYTHONUNBUFFERED=1
 
 WORKDIR /app
 
@@ -18,10 +14,11 @@ COPY api/ ./api/
 COPY shared/ ./shared/
 COPY migrations/ ./migrations/
 COPY alembic.ini .
-
-# Create storage directories
-RUN mkdir -p storage/originals storage/results
+COPY docker-entrypoint.sh .
+RUN chmod +x docker-entrypoint.sh
 
 EXPOSE 8000
 
+# Applies Alembic migrations, then starts the server
+ENTRYPOINT ["./docker-entrypoint.sh"]
 CMD ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000"]

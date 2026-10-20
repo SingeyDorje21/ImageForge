@@ -1,0 +1,9 @@
+{
+  "identities": [
+    {
+      "name": "imageforge",
+      "credentials": [{ "accessKey": "imageforge", "secretKey": "imageforge-secret" }],
+      "actions": ["Admin", "Read", "Write", "List", "Tagging"]
+    }
+  ]
+}

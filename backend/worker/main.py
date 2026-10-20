@@ -13,10 +13,13 @@ from PIL import UnidentifiedImageError
 from api.config import get_settings
 from shared.database import async_session_maker
 from shared.models import Job
+from shared import storage
 from worker.processor import process_image
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+CONTENT_TYPES = {".jpg": "image/jpeg", ".png": "image/png", ".webp": "image/webp"}
 
 async def process_job(message: aio_pika.IncomingMessage, channel: aio_pika.Channel, redis_client: redis.Redis):
     settings = get_settings()
@@ -57,17 +60,19 @@ async def process_job(message: aio_pika.IncomingMessage, channel: aio_pika.Chann
             await session.refresh(job)
 
             original_path = job.original_path
-            result_dir = os.path.join(settings.STORAGE_PATH, "results")
             ext = os.path.splitext(original_path)[1]
 
             try:
-                result_path = await asyncio.to_thread(
+                original = await asyncio.to_thread(storage.download_bytes, original_path)
+                result_bytes, result_ext = await asyncio.to_thread(
                     process_image,
-                    original_path=original_path,
-                    result_dir=result_dir,
-                    job_id=str(job.id),
+                    data=original,
                     ext=ext,
                     operations=job.operations,
+                )
+                result_path = f"results/{job.id}{result_ext}"
+                await asyncio.to_thread(
+                    storage.upload_bytes, result_path, result_bytes, CONTENT_TYPES.get(result_ext)
                 )
 
                 job.result_path = result_path

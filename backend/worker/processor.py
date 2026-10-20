@@ -1,11 +1,11 @@
-import os
+import io
 from PIL import Image
 
 FORMAT_EXT_MAP = {"jpg": "jpg", "jpeg": "jpg", "png": "png", "webp": "webp"}
 
-def process_image(original_path: str, result_dir: str, job_id: str, ext: str, operations: list[dict]) -> str:
-    """Apply operations sequentially via Pillow. Returns the result file path."""
-    img = Image.open(original_path)
+def process_image(data: bytes, ext: str, operations: list[dict]) -> tuple[bytes, str]:
+    """Apply operations sequentially via Pillow. Returns (result bytes, result extension)."""
+    img = Image.open(io.BytesIO(data))
     result_ext = ext  # default to original extension
 
     for op in operations:
@@ -19,13 +19,12 @@ def process_image(original_path: str, result_dir: str, job_id: str, ext: str, op
             if target in ("jpg", "jpeg") and img.mode == "RGBA":
                 img = img.convert("RGB")
 
-    result_path = os.path.join(result_dir, f"{job_id}{result_ext}")
-
     # Determine save format from extension
     save_format = result_ext.lstrip(".").upper()
     if save_format == "JPG":
         save_format = "JPEG"
 
-    img.save(result_path, format=save_format, quality=95)
+    out = io.BytesIO()
+    img.save(out, format=save_format, quality=95)
     img.close()
-    return result_path
+    return out.getvalue(), result_ext

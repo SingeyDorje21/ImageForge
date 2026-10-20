@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
 
-const API_BASE = 'http://localhost:8000';
+import { API_BASE } from '../config';
 
 const Login = ({ onLogin }) => {
   const [password, setPassword] = useState('');

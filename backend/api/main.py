@@ -7,12 +7,11 @@ from uuid import UUID
 from fastapi import FastAPI, Depends, File, Form, HTTPException, Query, UploadFile, status, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse
+from fastapi.responses import RedirectResponse
 import aio_pika
 import redis.asyncio as redis
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from fastapi.staticfiles import StaticFiles
 
 from api.schemas import (
     FormatConvertOperation,
@@ -27,11 +26,11 @@ class LoginRequest(BaseModel):
     password: str
 from shared.database import get_db
 from shared.models import Job
+from shared import storage
 from api.config import get_settings
 
 settings = get_settings()
 
-STORAGE_PATH = settings.STORAGE_PATH
 MAX_FILE_SIZE_MB = settings.MAX_FILE_SIZE_MB
 MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024
 
@@ -41,9 +40,9 @@ FORMAT_EXT_MAP = {"jpg": "jpg", "jpeg": "jpg", "png": "png", "webp": "webp"}
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    os.makedirs(os.path.join(STORAGE_PATH, "originals"), exist_ok=True)
-    os.makedirs(os.path.join(STORAGE_PATH, "results"), exist_ok=True)
-    
+    if settings.S3_CREATE_BUCKET:
+        await run_in_threadpool(storage.ensure_bucket)
+
     rabbitmq_connection = await aio_pika.connect_robust(settings.RABBITMQ_URL)
     rabbitmq_channel = await rabbitmq_connection.channel()
     
@@ -82,14 +81,35 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[o.strip() for o in settings.CORS_ORIGINS.split(",") if o.strip()],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-os.makedirs(STORAGE_PATH, exist_ok=True)
-app.mount("/storage", StaticFiles(directory=STORAGE_PATH), name="storage")
+CONTENT_TYPES = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp"}
+
+
+def _job_response(job: Job) -> JobStatusResponse:
+    return JobStatusResponse(
+        job_id=job.id,
+        status=job.status,
+        original_filename=job.original_filename,
+        result_path=job.result_path,
+        operations=job.operations,
+        retry_count=job.retry_count,
+        error_message=job.error_message,
+        created_at=job.created_at,
+        updated_at=job.updated_at,
+    )
+
+
+def _with_result_url(response: JobStatusResponse) -> JobStatusResponse:
+    # Signed URLs expire, so they are minted per request and never cached.
+    if response.result_path:
+        name = os.path.basename(response.result_path)
+        response.result_url = storage.presigned_url(response.result_path, download_name=name)
+    return response
 
 
 async def verify_rate_limit(request: Request):
@@ -103,11 +123,11 @@ async def verify_rate_limit(request: Request):
     if count == 1:
         await redis_client.expire(redis_key, 60)
         
-    if count > 10:
+    if count > settings.RATE_LIMIT_PER_MINUTE:
         await redis_client.incr("metrics:rate_limit:hits")
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail="Rate limit exceeded. Maximum 10 uploads per minute.",
+            detail=f"Rate limit exceeded. Maximum {settings.RATE_LIMIT_PER_MINUTE} uploads per minute.",
         )
 
 
@@ -183,8 +203,6 @@ async def create_job(
         )
 
     ops_validated = _parse_operations(operations)
-    original_dir = f"{STORAGE_PATH}/originals"
-    
     job = Job(
         original_filename=safe_filename,
         original_path="",
@@ -196,11 +214,10 @@ async def create_job(
     await db.refresh(job)
 
     job_id_str = str(job.id)
-    original_path = f"{original_dir}/{job_id_str}{ext}"
+    original_path = f"originals/{job_id_str}{ext}"
 
     try:
-        with open(original_path, "wb") as f:
-            f.write(content)
+        await run_in_threadpool(storage.upload_bytes, original_path, content, CONTENT_TYPES.get(ext))
 
         job.original_path = original_path
         await db.commit()
@@ -238,7 +255,7 @@ async def get_job(job_id: UUID, request: Request, db: AsyncSession = Depends(get
     cached_data = await redis_client.get(cache_key)
     if cached_data:
         try:
-            return JobStatusResponse.model_validate_json(cached_data)
+            return _with_result_url(JobStatusResponse.model_validate_json(cached_data))
         except Exception:
             pass
             
@@ -250,22 +267,26 @@ async def get_job(job_id: UUID, request: Request, db: AsyncSession = Depends(get
             detail=f"Job {job_id} not found",
         )
         
-    response = JobStatusResponse(
-        job_id=job.id,
-        status=job.status,
-        original_filename=job.original_filename,
-        result_path=job.result_path,
-        operations=job.operations,
-        retry_count=job.retry_count,
-        error_message=job.error_message,
-        created_at=job.created_at,
-        updated_at=job.updated_at,
-    )
+    response = _job_response(job)
     
     if job.status in ("completed", "failed"):
         await redis_client.setex(cache_key, 3600, response.model_dump_json())
         
-    return response
+    return _with_result_url(response)
+
+
+@app.get("/jobs/{job_id}/download")
+async def download_job_result(job_id: UUID, db: AsyncSession = Depends(get_db)):
+    """Redirect to a signed URL for the job's result image."""
+    result = await db.execute(select(Job).where(Job.id == job_id))
+    job = result.scalars().first()
+    if not job or not job.result_path:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No result for job {job_id}",
+        )
+    url = storage.presigned_url(job.result_path, download_name=os.path.basename(job.result_path))
+    return RedirectResponse(url, status_code=status.HTTP_307_TEMPORARY_REDIRECT)
 
 
 @app.get("/jobs", response_model=list[JobStatusResponse])
@@ -281,20 +302,7 @@ async def list_jobs(
 
     result = await db.execute(query)
     jobs = result.scalars().all()
-    return [
-        JobStatusResponse(
-            job_id=j.id,
-            status=j.status,
-            original_filename=j.original_filename,
-            result_path=j.result_path,
-            operations=j.operations,
-            retry_count=j.retry_count,
-            error_message=j.error_message,
-            created_at=j.created_at,
-            updated_at=j.updated_at,
-        )
-        for j in jobs
-    ]
+    return [_with_result_url(_job_response(j)) for j in jobs]
 
 
 @app.get("/metrics")

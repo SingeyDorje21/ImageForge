@@ -3,7 +3,7 @@ import axios from 'axios';
 import { AnimatePresence, motion } from 'motion/react';
 import { toast } from 'sonner';
 import clsx from 'clsx';
-import { Download, Plus, X } from 'lucide-react';
+import { Download, Plus, Search, X } from 'lucide-react';
 import { authHeaders, handleAuthError } from '../auth';
 import { API_BASE } from '../config';
 import ImageDrop from '../components/ImageDrop';
@@ -16,6 +16,21 @@ const STATUS = {
   processing: { label: 'Processing', dot: 'bg-accent animate-pulse', text: 'text-accent' },
   completed: { label: 'Done', dot: 'bg-success', text: 'text-success' },
   failed: { label: 'Failed', dot: 'bg-danger', text: 'text-danger' },
+};
+
+const FILTERS = [
+  { value: '', label: 'All' },
+  { value: 'pending', label: 'Pending' },
+  { value: 'processing', label: 'Processing' },
+  { value: 'completed', label: 'Done' },
+  { value: 'failed', label: 'Failed' },
+];
+
+// Seconds from upload to the job's last update: turnaround for finished jobs.
+const took = (job) => {
+  if (job.status !== 'completed' && job.status !== 'failed') return '—';
+  const sec = (new Date(job.updated_at) - new Date(job.created_at)) / 1000;
+  return sec < 60 ? `${sec.toFixed(1)} s` : `${(sec / 60).toFixed(1)} min`;
 };
 
 const StatusBadge = ({ status }) => {
@@ -58,6 +73,8 @@ const QueueMonitor = () => {
   const [jobs, setJobs] = useState([]);
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [selectedJob, setSelectedJob] = useState(null);
+  const [statusFilter, setStatusFilter] = useState('');
+  const [query, setQuery] = useState('');
   
   // Upload form state
   const [file, setFile] = useState(null);
@@ -67,7 +84,10 @@ const QueueMonitor = () => {
 
   const fetchJobs = async () => {
     try {
-      const res = await axios.get(`${API_BASE}/jobs?limit=50`, { headers: authHeaders() });
+      const res = await axios.get(`${API_BASE}/jobs`, {
+        params: { limit: 100, ...(statusFilter && { status: statusFilter }) },
+        headers: authHeaders(),
+      });
       setJobs(res.data);
     } catch (err) {
       if (handleAuthError(err)) return;
@@ -79,7 +99,9 @@ const QueueMonitor = () => {
     fetchJobs();
     const interval = setInterval(fetchJobs, 3000);
     return () => clearInterval(interval);
-  }, []);
+    // fetchJobs reads statusFilter, so refetch whenever the filter changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [statusFilter]);
 
   useEffect(() => {
     if (!file) return undefined;
@@ -111,26 +133,53 @@ const QueueMonitor = () => {
     }
   };
 
-  const counts = {
-    pending: jobs.filter((j) => j.status === 'pending').length,
-    processing: jobs.filter((j) => j.status === 'processing').length,
-  };
+  const needle = query.trim().toLowerCase();
+  const visible = needle
+    ? jobs.filter((j) => j.original_filename.toLowerCase().includes(needle) || j.job_id.startsWith(needle))
+    : jobs;
 
   return (
     <div className="space-y-8">
       <div className="flex items-end justify-between gap-4">
         <div>
           <h1 className="text-xl font-semibold tracking-tight">Jobs</h1>
-          <p className="text-sm text-muted mt-1">
-            {jobs.length} recent · {counts.pending} pending · {counts.processing} processing
-          </p>
+          <p className="text-sm text-muted mt-1">The latest 100 jobs. Click a finished job to see its result or error.</p>
         </div>
         <button onClick={() => setShowUploadModal(true)} className="btn-primary">
           <Plus size={16} /> New job
         </button>
       </div>
 
-      <div className="card overflow-hidden">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="inline-flex p-0.5 rounded-lg bg-subtle border border-line" role="tablist" aria-label="Filter by status">
+          {FILTERS.map((f) => (
+            <button
+              key={f.value}
+              role="tab"
+              aria-selected={statusFilter === f.value}
+              onClick={() => setStatusFilter(f.value)}
+              className={clsx(
+                'px-3 py-1 text-xs font-medium rounded-md transition-colors',
+                statusFilter === f.value ? 'bg-surface text-fg shadow-sm' : 'text-muted hover:text-fg'
+              )}
+            >
+              {f.label}
+            </button>
+          ))}
+        </div>
+        <label className="relative w-full sm:w-64">
+          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
+          <input
+            type="search"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search file name or job ID"
+            className="input pl-8 py-1.5"
+          />
+        </label>
+      </div>
+
+      <div className="card overflow-hidden -mt-4">
         <div className="overflow-x-auto">
           <table className="w-full text-left text-sm">
             <thead className="text-muted border-b border-line">
@@ -139,15 +188,16 @@ const QueueMonitor = () => {
                 <th className="px-5 py-3 font-medium text-xs">Status</th>
                 <th className="px-5 py-3 font-medium text-xs">File</th>
                 <th className="px-5 py-3 font-medium text-xs">Steps</th>
+                <th className="px-5 py-3 font-medium text-xs text-right">Took</th>
                 <th className="px-5 py-3 font-medium text-xs text-right">Created</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-line">
-              {jobs.length === 0 && (
-                <tr><td colSpan={5} className="px-5 py-12 text-center text-muted">No jobs yet.</td></tr>
+              {visible.length === 0 && (
+                <tr><td colSpan={6} className="px-5 py-12 text-center text-muted">No matching jobs.</td></tr>
               )}
-              {jobs.map((job) => {
-                const clickable = job.status === 'completed' && resultUrl(job);
+              {visible.map((job) => {
+                const clickable = (job.status === 'completed' && resultUrl(job)) || job.status === 'failed';
                 return (
                   <tr
                     key={job.job_id}
@@ -166,8 +216,9 @@ const QueueMonitor = () => {
                         ))}
                       </div>
                     </td>
-                    <td className="px-5 py-3 text-right text-muted tabular-nums">
-                      {new Date(job.created_at).toLocaleTimeString()}
+                    <td className="px-5 py-3 text-right text-muted tabular-nums">{took(job)}</td>
+                    <td className="px-5 py-3 text-right text-muted tabular-nums whitespace-nowrap">
+                      {new Date(job.created_at).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
                     </td>
                   </tr>
                 );
@@ -198,6 +249,13 @@ const QueueMonitor = () => {
 
         {selectedJob && (
           <Modal title={selectedJob.original_filename} onClose={() => setSelectedJob(null)}>
+            {selectedJob.status === 'failed' ? (
+              <div className="space-y-3 text-sm">
+                <p className="text-danger font-medium">Failed after {selectedJob.retry_count} retries</p>
+                <pre className="bg-subtle rounded-lg p-3 text-xs whitespace-pre-wrap break-all">{selectedJob.error_message || 'No error message recorded.'}</pre>
+                <p className="text-xs font-mono text-muted break-all">{selectedJob.job_id}</p>
+              </div>
+            ) : (<>
             <div className="rounded-xl bg-subtle flex items-center justify-center aspect-video overflow-hidden mb-4">
               <img src={resultUrl(selectedJob)} alt="Result" className="max-w-full max-h-full object-contain" />
             </div>
@@ -205,6 +263,7 @@ const QueueMonitor = () => {
             <a href={resultUrl(selectedJob)} download target="_blank" rel="noreferrer" className="btn-primary w-full py-2.5">
               <Download size={16} /> Download
             </a>
+            </>)}
           </Modal>
         )}
       </AnimatePresence>

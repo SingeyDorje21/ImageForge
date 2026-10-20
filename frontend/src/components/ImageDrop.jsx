@@ -8,7 +8,7 @@ export const MAX_FILE_MB = 10;
 const ACCEPT = { 'image/jpeg': ['.jpg', '.jpeg'], 'image/png': ['.png'], 'image/webp': ['.webp'] };
 
 // Drop, browse or paste an image. Shows a preview with dimensions and size once chosen.
-const ImageDrop = ({ file, previewUrl, onFile, onClear, onReject }) => {
+const ImageDrop = ({ file, previewUrl, onFile, onClear, onReject, className = 'h-64' }) => {
   const [dimensions, setDimensions] = useState(null);
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
@@ -68,7 +68,8 @@ const ImageDrop = ({ file, previewUrl, onFile, onClear, onReject }) => {
     <div
       {...getRootProps()}
       className={clsx(
-        'flex flex-col items-center justify-center gap-3 h-64 rounded-2xl border-2 border-dashed cursor-pointer transition-colors text-center px-6',
+        'flex flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed cursor-pointer transition-colors text-center px-6',
+        className,
         isDragActive ? 'border-accent bg-accent/5' : 'border-line hover:border-muted bg-surface'
       )}
     >

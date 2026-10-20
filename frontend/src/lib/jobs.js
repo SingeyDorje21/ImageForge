@@ -1,5 +1,3 @@
-import { useEffect, useState } from 'react';
-import axios from 'axios';
 import { API_BASE } from '../config';
 
 // Prefer the API's signed result URL; fall back to the local storage route.
@@ -17,32 +15,3 @@ export const formatBytes = (bytes) => {
 };
 
 export const isActive = (status) => status === 'pending' || status === 'processing';
-
-// Polls a job until it finishes. Returns the latest job record (null before one is set).
-export const useJobPolling = (initialJob) => {
-  const [job, setJob] = useState(initialJob);
-
-  useEffect(() => setJob(initialJob), [initialJob]);
-
-  const jobId = job?.job_id;
-  const active = job && isActive(job.status);
-
-  useEffect(() => {
-    if (!active) return undefined;
-    let cancelled = false;
-    const interval = setInterval(async () => {
-      try {
-        const res = await axios.get(`${API_BASE}/jobs/${jobId}`);
-        if (!cancelled) setJob(res.data);
-      } catch (err) {
-        console.error(err);
-      }
-    }, 1000);
-    return () => {
-      cancelled = true;
-      clearInterval(interval);
-    };
-  }, [jobId, active]);
-
-  return job;
-};

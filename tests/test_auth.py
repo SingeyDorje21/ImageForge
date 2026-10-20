@@ -23,8 +23,26 @@ from api.main import app  # noqa: E402
 
 
 class FakeRedis:
+    """In-memory stand-in for the few Redis commands the API uses here."""
+
+    def __init__(self):
+        self.data = {}
+
     async def get(self, key):
-        return None
+        return self.data.get(key)
+
+    async def incr(self, key):
+        self.data[key] = int(self.data.get(key, 0)) + 1
+        return self.data[key]
+
+    async def expire(self, key, seconds):
+        return True
+
+    async def ttl(self, key):
+        return 900 if key in self.data else -2
+
+    async def delete(self, key):
+        self.data.pop(key, None)
 
 
 @asynccontextmanager
@@ -105,3 +123,20 @@ def test_cors_blocks_other_origin(client):
         headers={"Origin": "https://evil.example.com", "Access-Control-Request-Method": "GET"},
     )
     assert "access-control-allow-origin" not in resp.headers
+
+
+def test_login_rate_limited_after_failed_attempts(client):
+    max_attempts = auth.get_settings().LOGIN_MAX_ATTEMPTS
+    for _ in range(max_attempts):
+        assert client.post("/login", json={"password": "nope"}).status_code == 401
+    resp = client.post("/login", json={"password": "test-password"})
+    assert resp.status_code == 429
+    assert int(resp.headers["Retry-After"]) > 0
+
+
+def test_successful_login_resets_failures(client):
+    max_attempts = auth.get_settings().LOGIN_MAX_ATTEMPTS
+    for _ in range(max_attempts - 1):
+        client.post("/login", json={"password": "nope"})
+    assert client.post("/login", json={"password": "test-password"}).status_code == 200
+    assert client.post("/login", json={"password": "nope"}).status_code == 401

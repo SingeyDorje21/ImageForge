@@ -18,6 +18,9 @@ class Settings(BaseSettings):
     # Key used to sign admin tokens. Set a long random value in production.
     JWT_SECRET: str | None = None
     TOKEN_TTL_MINUTES: int = 60
+    # Failed admin logins allowed per client IP within the window before /login returns 429.
+    LOGIN_MAX_ATTEMPTS: int = 5
+    LOGIN_WINDOW_SECONDS: int = 900
     # Comma-separated list of origins allowed to call the API from a browser.
     CORS_ORIGINS: str = "http://localhost:5173"
 

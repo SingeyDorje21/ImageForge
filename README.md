@@ -109,6 +109,7 @@ npm run dev
 | `ADMIN_PASSWORD` | Admin portal password. Login is disabled (HTTP 503) until it is set. |
 | `JWT_SECRET` | Key that signs admin tokens. If unset, a random key is used and tokens stop working on restart. |
 | `TOKEN_TTL_MINUTES` | How long an admin token stays valid (default 60). |
+| `LOGIN_MAX_ATTEMPTS` / `LOGIN_WINDOW_SECONDS` | Failed logins allowed per client IP within the window (default 5 per 15 minutes); further attempts get HTTP 429 until it expires. |
 | `CORS_ORIGINS` | Comma-separated browser origins allowed to call the API (default `http://localhost:5173`). |
 
 `GET /jobs` and `GET /metrics` require an `Authorization: Bearer <token>` header obtained from `POST /login`.

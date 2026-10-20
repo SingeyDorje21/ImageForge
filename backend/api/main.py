@@ -322,8 +322,27 @@ async def get_metrics(request: Request):
 
 
 @app.post("/login")
-async def login(req: LoginRequest):
+async def login(req: LoginRequest, request: Request):
+    client_ip = request.client.host if request.client else "127.0.0.1"
+    redis_key = f"login_failures:{client_ip}"
+    redis_client = request.app.state.redis
+
+    failures = int(await redis_client.get(redis_key) or 0)
+    if failures >= settings.LOGIN_MAX_ATTEMPTS:
+        retry_after = await redis_client.ttl(redis_key)
+        await redis_client.incr("metrics:login_rate_limit:hits")
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many failed login attempts. Try again later.",
+            headers={"Retry-After": str(max(retry_after, 1))},
+        )
+
     if check_password(req.password):
+        await redis_client.delete(redis_key)
         token, expires_in = create_token()
         return {"token": token, "token_type": "bearer", "expires_in": expires_in}
+
+    count = await redis_client.incr(redis_key)
+    if count == 1:
+        await redis_client.expire(redis_key, settings.LOGIN_WINDOW_SECONDS)
     raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid password")

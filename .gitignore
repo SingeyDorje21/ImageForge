@@ -48,3 +48,5 @@ verify_api.py
 stress_test.py
 run_migration.py
 deploy/cloudrun/config.env
+.neon
+node_modules/

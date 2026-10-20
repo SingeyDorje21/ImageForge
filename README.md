@@ -104,7 +104,7 @@ cd ../frontend && npm install && npm run dev     # terminal 3
 
 ## ☁️ Configuration for deployment
 
-To deploy to Google Cloud Run with everything scaled to zero when idle (Cloud Tasks, Neon, Upstash, Cloudflare R2 and Pages), follow [deploy/cloudrun/README.md](deploy/cloudrun/README.md).
+To deploy to Google Cloud Run with everything scaled to zero when idle (Cloud Tasks, Neon, Upstash and Cloudflare R2, with the frontend on Vercel), follow [deploy/cloudrun/README.md](deploy/cloudrun/README.md).
 
 There are two worker entrypoints: `python -m worker.main` consumes RabbitMQ (local and compose), and `uvicorn worker.server:app` is the HTTP worker Cloud Tasks pushes to.
 

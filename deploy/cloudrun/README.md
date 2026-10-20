@@ -11,7 +11,7 @@ except storage.
 | Database | [Neon](https://neon.tech) serverless Postgres, suspends when idle | $0 on the free plan |
 | Redis | [Upstash](https://upstash.com), billed per request | $0 on the free plan |
 | Images | [Cloudflare R2](https://developers.cloudflare.com/r2/), no download (egress) fees | $0 up to 10 GB |
-| Frontend | [Cloudflare Pages](https://pages.cloudflare.com) | $0 |
+| Frontend | [Vercel](https://vercel.com) | $0 on the Hobby plan (personal, non-commercial use) |
 
 Cloud Run's free tier also covers 2M requests and 180k vCPU-seconds per month.
 Expect a cold start of a second or two on the first request after a quiet period.
@@ -54,14 +54,19 @@ The script enables the APIs, creates the service accounts, Secret Manager secret
 the Cloud Tasks queue and both Cloud Run services, then prints the API URL. Re-run
 it to ship a new version. The API applies database migrations on startup.
 
-## Frontend on Cloudflare Pages
+## Frontend on Vercel
 
-Connect the repo in Cloudflare Pages with:
+`frontend/vercel.json` builds the Vite app and rewrites every path to `index.html`,
+so routes like `/login` and `/admin` load on refresh or a direct link.
 
-- Root directory: `frontend`
-- Build command: `npm run build`
-- Output directory: `dist`
-- Environment variable: `VITE_API_URL` = the API URL the deploy script printed
+1. In Vercel, **Add New → Project** and import the repo.
+2. Set **Root Directory** to `frontend`. Vercel picks up the build settings from `vercel.json`.
+3. Under **Environment Variables**, add `VITE_API_URL` = the API URL the deploy script
+   printed (for example `https://imageforge-api-xxxx-uc.a.run.app`), for Production and Preview.
+   It's baked in at build time, so redeploy after changing it.
+4. Deploy, then set `CORS_ORIGINS` in `config.env` to your Vercel domain (for example
+   `https://imageforge.vercel.app`) and re-run `./deploy/cloudrun/deploy.sh`.
 
-Then make sure `CORS_ORIGINS` in `config.env` is the Pages URL (for example
-`https://imageforge.pages.dev`) and re-run the deploy script if you changed it.
+`CORS_ORIGINS` takes a comma-separated list, so add a custom domain alongside the
+`.vercel.app` one if you use both. Preview deployments get their own URLs; they can
+only call the API if you add those origins too.

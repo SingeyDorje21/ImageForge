@@ -1,4 +1,5 @@
 import os
+import uuid
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
@@ -29,12 +30,39 @@ def normalize_database_url(url: str) -> str:
     return urlunsplit((scheme, parts.netloc, parts.path, urlencode(query), parts.fragment))
 
 
+def uses_pooler(url: str) -> bool:
+    """True when connections go through a transaction-mode pooler (PgBouncer).
+
+    Detected from Neon's "-pooler" hostnames; DATABASE_POOLED=true/false overrides.
+    """
+    override = os.getenv("DATABASE_POOLED", "").strip().lower()
+    if override in ("true", "1", "yes"):
+        return True
+    if override in ("false", "0", "no"):
+        return False
+    return "-pooler." in (urlsplit(url).hostname or "")
+
+
+def engine_connect_args(url: str) -> dict:
+    """asyncpg caches named prepared statements per connection, but a transaction-mode
+    pooler hands each transaction a different server connection, so cached statements
+    vanish ("prepared statement ... does not exist"). Disable the caches and give every
+    statement a unique name, as SQLAlchemy recommends for PgBouncer."""
+    if not uses_pooler(url):
+        return {}
+    return {
+        "statement_cache_size": 0,
+        "prepared_statement_cache_size": 0,
+        "prepared_statement_name_func": lambda: f"__asyncpg_{uuid.uuid4()}__",
+    }
+
+
 DATABASE_URL = normalize_database_url(os.getenv(
     "DATABASE_URL",
     "postgresql+asyncpg://imageforge:imageforge@localhost:5433/imageforge"
 ))
 
-engine = create_async_engine(DATABASE_URL, echo=False)
+engine = create_async_engine(DATABASE_URL, echo=False, connect_args=engine_connect_args(DATABASE_URL))
 
 async_session_maker = async_sessionmaker(
     engine, class_=AsyncSession, expire_on_commit=False

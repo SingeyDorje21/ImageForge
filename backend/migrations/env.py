@@ -23,7 +23,7 @@ if config.config_file_name is not None:
 # add your model's MetaData object here
 # for 'autogenerate' support
 from shared.models import Base
-from shared.database import normalize_database_url
+from shared.database import engine_connect_args, normalize_database_url
 target_metadata = Base.metadata
 
 # other values from the config, defined by the needs of env.py,
@@ -76,6 +76,7 @@ async def run_async_migrations() -> None:
         configuration,
         prefix="sqlalchemy.",
         poolclass=pool.NullPool,
+        connect_args=engine_connect_args(url),
     )
 
     async with connectable.connect() as connection:

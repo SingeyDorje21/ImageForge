@@ -43,6 +43,39 @@ At its core, ImageFlow embraces a highly decoupled microservices architecture:
 
 ---
 
+## 🎛️ Image Operations
+
+`POST /jobs` takes a JSON array of operations in the `operations` form field. They run in order, so you can chain them (e.g. crop, then resize, then watermark, then convert to WebP).
+
+| `type` | Parameters |
+|---|---|
+| `resize` | `width`, `height` (1-10000) |
+| `crop` | `left`, `top` (0-10000), `width`, `height` (1-10000). Fails the job if the box is outside the image. |
+| `rotate` | `degrees` (-360 to 360, counter-clockwise), `expand` (default `true`, grows the canvas to fit) |
+| `flip` | `direction`: `horizontal` or `vertical` |
+| `grayscale` | none |
+| `blur` | `radius` (default 2) |
+| `sharpen` | `radius` (default 2), `percent` (strength, default 150) |
+| `watermark` | `text`, `position` (`top_left`, `top_right`, `bottom_left`, `bottom_right`, `center`), `opacity` (0-1, default 0.5), `font_size` (default 24) |
+| `quality` | `quality` (1-100) for JPEG/WebP output. PNG output is always lossless and optimized. |
+| `strip_exif` | none. Without it, the original EXIF metadata is kept. |
+| `format_convert` | `target_format`: `jpg`, `png` or `webp` |
+
+Example:
+
+```json
+[
+  {"type": "crop", "left": 0, "top": 0, "width": 800, "height": 800},
+  {"type": "resize", "width": 400, "height": 400},
+  {"type": "watermark", "text": "© Me", "position": "bottom_right"},
+  {"type": "strip_exif"},
+  {"type": "quality", "quality": 80},
+  {"type": "format_convert", "target_format": "webp"}
+]
+```
+
+Operation unit tests run without any services: `pip install pytest pillow pydantic pydantic-settings && pytest tests/test_operations.py`.
+
 ## 🚀 How to Run Locally
 
 ### Option A: everything in Docker

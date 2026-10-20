@@ -13,11 +13,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.schemas import (
-    FormatConvertOperation,
+    OPERATION_MODELS,
     JobCreateResponse,
     JobStatusResponse,
-    Operation,
-    ResizeOperation,
 )
 from pydantic import BaseModel
 
@@ -150,17 +148,20 @@ def _parse_operations(operations_json: str) -> list[dict]:
 
     validated: list[dict] = []
     for i, op in enumerate(ops_raw):
+        if not isinstance(op, dict):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Operation at index {i} must be a JSON object",
+            )
         op_type = op.get("type")
         try:
-            if op_type == "resize":
-                parsed = ResizeOperation(**op)
-            elif op_type == "format_convert":
-                parsed = FormatConvertOperation(**op)
-            else:
+            model = OPERATION_MODELS.get(op_type)
+            if model is None:
                 raise HTTPException(
                     status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                     detail=f"Unknown operation type '{op_type}' at index {i}",
                 )
+            parsed = model(**op)
             validated.append(parsed.model_dump())
         except Exception as exc:
             if isinstance(exc, HTTPException):

@@ -2,6 +2,8 @@ import React, { useEffect, useState } from 'react';
 import axios from 'axios';
 import { authHeaders, handleAuthError } from '../auth';
 import { Layers, Play, RefreshCw, X, Download } from 'lucide-react';
+import OperationBuilder from '../components/OperationBuilder';
+import { newStep, toPayload } from '../lib/operations';
 
 import { API_BASE } from '../config';
 
@@ -12,10 +14,7 @@ const QueueMonitor = () => {
   
   // Upload form state
   const [file, setFile] = useState(null);
-  const [opType, setOpType] = useState('resize');
-  const [width, setWidth] = useState(400);
-  const [height, setHeight] = useState(400);
-  const [format, setFormat] = useState('webp');
+  const [steps, setSteps] = useState(() => [newStep('resize')]);
   const [uploading, setUploading] = useState(false);
 
   const fetchJobs = async () => {
@@ -36,19 +35,13 @@ const QueueMonitor = () => {
 
   const handleUpload = async (e) => {
     e.preventDefault();
-    if (!file) return;
+    if (!file || steps.length === 0) return;
     
     setUploading(true);
     const formData = new FormData();
     formData.append('file', file);
     
-    let ops = [];
-    if (opType === 'resize') {
-      ops.push({ type: 'resize', width: parseInt(width), height: parseInt(height) });
-    } else {
-      ops.push({ type: 'format_convert', target_format: format });
-    }
-    formData.append('operations', JSON.stringify(ops));
+    formData.append('operations', JSON.stringify(toPayload(steps)));
 
     try {
       await axios.post(`${API_BASE}/jobs`, formData);
@@ -56,7 +49,8 @@ const QueueMonitor = () => {
       setFile(null);
       fetchJobs();
     } catch (err) {
-      alert(err.response?.data?.detail || 'Upload failed');
+      const detail = err.response?.data?.detail;
+      alert(typeof detail === 'string' ? detail : 'Upload failed');
     } finally {
       setUploading(false);
     }
@@ -160,7 +154,7 @@ const QueueMonitor = () => {
       {/* Upload Modal */}
       {showUploadModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-background/80 backdrop-blur-sm">
-          <div className="glass-panel w-full max-w-md p-6 relative">
+          <div className="glass-panel w-full max-w-md p-6 relative max-h-[90vh] overflow-y-auto">
             <button onClick={() => setShowUploadModal(false)} className="absolute top-4 right-4 text-textMuted hover:text-white">
               <X size={24} />
             </button>
@@ -171,35 +165,18 @@ const QueueMonitor = () => {
                 <input type="file" onChange={(e) => setFile(e.target.files[0])} accept="image/*" required className="w-full text-sm text-textMuted file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-primary/10 file:text-primary hover:file:bg-primary/20 cursor-pointer" />
               </div>
               <div>
-                <label className="block text-xs text-textMuted uppercase mb-1">Operation</label>
-                <select value={opType} onChange={e => setOpType(e.target.value)} className="w-full bg-white/5 border border-border rounded px-3 py-2 text-white">
-                  <option value="resize">Resize</option>
-                  <option value="format_convert">Format Convert</option>
-                </select>
+                <label className="block text-xs text-textMuted uppercase mb-1">Operations (applied in order)</label>
+                <OperationBuilder
+                  steps={steps}
+                  onChange={setSteps}
+                  inputClass="w-full bg-white/5 border border-border rounded px-3 py-2 text-white text-sm"
+                  labelClass="text-xs font-bold text-white uppercase tracking-wider"
+                  stepClass="bg-white/5 border border-border rounded p-3 text-textMuted"
+                  buttonClass="bg-primary/10 text-primary hover:bg-primary/20 font-semibold text-sm px-3 py-2 rounded"
+                />
               </div>
-              {opType === 'resize' ? (
-                <div className="flex gap-4">
-                  <div className="flex-1">
-                    <label className="block text-xs text-textMuted uppercase mb-1">Width</label>
-                    <input type="number" value={width} onChange={e => setWidth(e.target.value)} className="w-full bg-white/5 border border-border rounded px-3 py-2 text-white" />
-                  </div>
-                  <div className="flex-1">
-                    <label className="block text-xs text-textMuted uppercase mb-1">Height</label>
-                    <input type="number" value={height} onChange={e => setHeight(e.target.value)} className="w-full bg-white/5 border border-border rounded px-3 py-2 text-white" />
-                  </div>
-                </div>
-              ) : (
-                <div>
-                  <label className="block text-xs text-textMuted uppercase mb-1">Target Format</label>
-                  <select value={format} onChange={e => setFormat(e.target.value)} className="w-full bg-white/5 border border-border rounded px-3 py-2 text-white">
-                    <option value="webp">WebP</option>
-                    <option value="png">PNG</option>
-                    <option value="jpg">JPG</option>
-                  </select>
-                </div>
-              )}
               <div className="pt-4">
-                <button type="submit" disabled={uploading || !file} className="w-full bg-primary hover:bg-blue-400 text-slate-900 font-bold py-3 rounded transition-colors disabled:opacity-50">
+                <button type="submit" disabled={uploading || !file || steps.length === 0} className="w-full bg-primary hover:bg-blue-400 text-slate-900 font-bold py-3 rounded transition-colors disabled:opacity-50">
                   {uploading ? 'Submitting...' : 'Queue Task'}
                 </button>
               </div>

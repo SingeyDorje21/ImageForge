@@ -13,7 +13,7 @@ from api.config import get_settings
 from shared import storage
 from shared.database import async_session_maker
 from shared.models import Job
-from worker.processor import process_image
+from worker.processor import InvalidOperationError, process_image
 
 logger = logging.getLogger(__name__)
 
@@ -77,7 +77,7 @@ async def run_job(job_id: str, redis_client: redis.Redis) -> Outcome:
             await redis_client.incrbyfloat("metrics:jobs:total_time_sec", duration)
             return Outcome.COMPLETED
 
-        except UnidentifiedImageError as e:
+        except (UnidentifiedImageError, InvalidOperationError) as e:
             logger.error(f"Job {job_id} failed (unrecoverable): {e}")
             job.status = "failed"
             job.error_message = f"Unrecoverable: {e}"

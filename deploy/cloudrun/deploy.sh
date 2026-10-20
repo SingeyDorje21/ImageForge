@@ -7,8 +7,34 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
-# shellcheck disable=SC1091
-set -a; source "$HERE/config.env"; set +a
+CONFIG="$HERE/config.env"
+[ -f "$CONFIG" ] || { echo "Missing $CONFIG. Copy config.example.env to config.env and fill it in." >&2; exit 1; }
+
+# Read KEY=VALUE lines literally. Sourcing the file would let shell syntax in a value
+# (the & in a Neon URL, a $ or ! in a password) split or rewrite it. One pair of
+# surrounding quotes is allowed and stripped.
+while IFS= read -r line || [ -n "$line" ]; do
+  line="${line%$'\r'}"
+  case "$line" in ''|'#'*) continue ;; esac
+  key="${line%%=*}"
+  value="${line#*=}"
+  [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
+  if [[ "$value" =~ ^\"(.*)\"$ ]] || [[ "$value" =~ ^\'(.*)\'$ ]]; then
+    value="${BASH_REMATCH[1]}"
+  fi
+  export "$key=$value"
+done < "$CONFIG"
+
+missing=()
+for var in GCP_PROJECT DATABASE_URL REDIS_URL S3_BUCKET S3_ENDPOINT_URL \
+           S3_ACCESS_KEY_ID S3_SECRET_ACCESS_KEY ADMIN_PASSWORD JWT_SECRET CORS_ORIGINS; do
+  [ -n "${!var:-}" ] || missing+=("$var")
+done
+if [ "${#missing[@]}" -gt 0 ]; then
+  echo "These values are empty or missing in $CONFIG: ${missing[*]}" >&2
+  exit 1
+fi
+S3_REGION="${S3_REGION:-auto}"
 
 PROJECT="$GCP_PROJECT"
 REGION="${GCP_REGION:-us-central1}"
@@ -67,15 +93,16 @@ echo "==> Building images"
 gcloud builds submit "$ROOT" --config "$HERE/cloudbuild.yaml" \
   --substitutions "_REGION=$REGION,_REPO=$REPO"
 
-# "^@^" switches gcloud's env-var separator to "@" so values may contain commas
-COMMON_ENV="S3_BUCKET=$S3_BUCKET@S3_ENDPOINT_URL=$S3_ENDPOINT_URL@S3_REGION=$S3_REGION@MAX_RETRIES=$MAX_RETRIES"
+# "^|^" switches gcloud's env-var separator to "|" so values may contain commas (CORS_ORIGINS)
+# and "@" (service account emails)
+COMMON_ENV="S3_BUCKET=$S3_BUCKET|S3_ENDPOINT_URL=$S3_ENDPOINT_URL|S3_REGION=$S3_REGION|MAX_RETRIES=$MAX_RETRIES"
 
 echo "==> Worker service (private, invoked only by Cloud Tasks)"
 gcloud run deploy imageforge-worker --image "$IMAGE_BASE/worker:latest" --region "$REGION" \
   --service-account "$RUN_SA" --no-allow-unauthenticated \
   --command uvicorn --args "worker.server:app,--host,0.0.0.0,--port,8080" --port 8080 \
   --min-instances 0 --max-instances 3 --concurrency 4 --cpu 1 --memory 1Gi --timeout 300 \
-  --set-env-vars "^@^$COMMON_ENV" \
+  --set-env-vars "^|^$COMMON_ENV" \
   --set-secrets "$(secret_flags DATABASE_URL REDIS_URL S3_ACCESS_KEY_ID S3_SECRET_ACCESS_KEY)"
 WORKER_URL="$(gcloud run services describe imageforge-worker --region "$REGION" --format 'value(status.url)')"
 gcloud run services add-iam-policy-binding imageforge-worker --region "$REGION" \
@@ -94,7 +121,7 @@ echo "==> API service (public)"
 gcloud run deploy imageforge-api --image "$IMAGE_BASE/api:latest" --region "$REGION" \
   --service-account "$RUN_SA" --allow-unauthenticated --port 8000 \
   --min-instances 0 --max-instances 3 --cpu 1 --memory 512Mi \
-  --set-env-vars "^@^$COMMON_ENV@QUEUE_BACKEND=cloudtasks@GCP_PROJECT=$PROJECT@GCP_LOCATION=$REGION@CLOUD_TASKS_QUEUE=$QUEUE@WORKER_URL=$WORKER_URL@TASKS_SERVICE_ACCOUNT=$TASKS_SA@CORS_ORIGINS=$CORS_ORIGINS@TRUST_PROXY_HEADERS=true" \
+  --set-env-vars "^|^$COMMON_ENV|QUEUE_BACKEND=cloudtasks|GCP_PROJECT=$PROJECT|GCP_LOCATION=$REGION|CLOUD_TASKS_QUEUE=$QUEUE|WORKER_URL=$WORKER_URL|TASKS_SERVICE_ACCOUNT=$TASKS_SA|CORS_ORIGINS=$CORS_ORIGINS|TRUST_PROXY_HEADERS=true" \
   --set-secrets "$(secret_flags DATABASE_URL REDIS_URL S3_ACCESS_KEY_ID S3_SECRET_ACCESS_KEY ADMIN_PASSWORD JWT_SECRET)"
 API_URL="$(gcloud run services describe imageforge-api --region "$REGION" --format 'value(status.url)')"
 
